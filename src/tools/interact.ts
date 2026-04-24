@@ -28,14 +28,18 @@ export const typeDefinition = {
   },
 };
 
-function buildFindScript(selector?: string, text?: string): string {
+function buildFindScript(selector?: string, text?: string, clearValue = false): string {
+  const clearSnippet = clearValue ? `if ('value' in el) el.value = '';` : '';
   if (selector && text) {
     return `(() => {
       const els = document.querySelectorAll('${selector.replace(/'/g, "\\'")}');
       for (const el of els) {
         if ((el.textContent || '').trim() === '${text.replace(/'/g, "\\'")}') {
           const r = el.getBoundingClientRect();
-          if (r.width > 0 && r.height > 0) return JSON.stringify({ x: r.x + r.width / 2, y: r.y + r.height / 2 });
+          if (r.width > 0 && r.height > 0) {
+            ${clearSnippet}
+            return JSON.stringify({ x: r.x + r.width / 2, y: r.y + r.height / 2 });
+          }
         }
       }
       return JSON.stringify({ error: 'not_found', similar: [] });
@@ -50,6 +54,7 @@ function buildFindScript(selector?: string, text?: string): string {
         return JSON.stringify({ error: 'not_found', similar });
       }
       const r = el.getBoundingClientRect();
+      ${clearSnippet}
       return JSON.stringify({ x: r.x + r.width / 2, y: r.y + r.height / 2 });
     })()`;
   }
@@ -59,24 +64,26 @@ function buildFindScript(selector?: string, text?: string): string {
       const all = document.querySelectorAll('*');
       let best = null;
       for (const el of all) {
+        const t = (el.textContent || '').trim();
+        if (t !== target) continue;
+        const hasChild = Array.from(el.children).some(c => (c.textContent || '').trim() === target);
+        if (hasChild) continue;
         const s = window.getComputedStyle(el);
         if (s.display === 'none' || s.visibility === 'hidden') continue;
-        const t = (el.textContent || '').trim();
-        if (t === target) {
-          const hasChild = Array.from(el.children).some(c => (c.textContent || '').trim() === target);
-          if (!hasChild) best = el;
-        }
+        best = el;
       }
       if (!best) return JSON.stringify({ error: 'not_found', similar: [] });
-      const r = best.getBoundingClientRect();
+      const el = best;
+      const r = el.getBoundingClientRect();
+      ${clearSnippet}
       return JSON.stringify({ x: r.x + r.width / 2, y: r.y + r.height / 2 });
     })()`;
   }
   return '';
 }
 
-async function findAndClick(cdp: CdpClient, selector?: string, text?: string) {
-  const script = buildFindScript(selector, text);
+async function findAndClick(cdp: CdpClient, selector?: string, text?: string, clearValue = false) {
+  const script = buildFindScript(selector, text, clearValue);
   if (!script) {
     return { isError: true, content: [{ type: 'text' as const, text: 'selector 또는 text 중 하나는 필수입니다.' }] };
   }
@@ -107,9 +114,8 @@ export async function typeHandler(args: { selector?: string; text?: string; valu
       return { isError: true, content: [{ type: 'text' as const, text: 'value는 필수입니다.' }] };
     }
     const cdp = await ensureConnected();
-    const clickResult = await findAndClick(cdp, args.selector, args.text);
+    const clickResult = await findAndClick(cdp, args.selector, args.text, true);
     if (clickResult.isError) return clickResult;
-    await cdp.send('Runtime.evaluate', { expression: `document.activeElement && (document.activeElement.value = '')` });
     await cdp.send('Input.insertText', { text: args.value });
     return { content: [{ type: 'text' as const, text: `입력 완료: "${args.value}"` }] };
   } catch (error) {

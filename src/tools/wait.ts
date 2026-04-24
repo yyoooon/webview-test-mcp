@@ -13,7 +13,9 @@ export const definition = {
   },
 };
 
-const POLL_INTERVAL = 200;
+const POLL_INITIAL = 50;
+const POLL_MAX = 200;
+const POLL_GROWTH = 1.5;
 const DEFAULT_TIMEOUT = 10_000;
 
 export async function handler(args: { selector?: string; expression?: string; timeout?: number }) {
@@ -25,6 +27,7 @@ export async function handler(args: { selector?: string; expression?: string; ti
     const timeout = args.timeout ?? DEFAULT_TIMEOUT;
     const checkExpression = args.selector ? `document.querySelector('${args.selector.replace(/'/g, "\\'")}') !== null` : args.expression!;
     const startTime = Date.now();
+    let interval = POLL_INITIAL;
     while (true) {
       const result = (await cdp.send('Runtime.evaluate', { expression: checkExpression, returnByValue: true })) as { result: { value: unknown } };
       if (result.result.value) {
@@ -33,7 +36,8 @@ export async function handler(args: { selector?: string; expression?: string; ti
       if (Date.now() - startTime >= timeout) {
         return { isError: true, content: [{ type: 'text' as const, text: `시간 초과 (${timeout}ms): ${args.selector ? `"${args.selector}" 미발견` : '조건 미충족'}` }] };
       }
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+      await new Promise((resolve) => setTimeout(resolve, interval));
+      interval = Math.min(Math.round(interval * POLL_GROWTH), POLL_MAX);
     }
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
