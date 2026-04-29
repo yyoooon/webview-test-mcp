@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Window } from 'happy-dom';
-import { VISIBLE_FILTER_JS, selectorSnippet } from '../src/selector.js';
+import { VISIBLE_FILTER_JS, selectorSnippet, fuzzyCandidatesSnippet } from '../src/selector.js';
 
 function evalInDom(html: string, expr: string): unknown {
   const window = new Window({
@@ -127,5 +127,28 @@ describe('selectorSnippet — text', () => {
     const snippet = selectorSnippet({ text: 'Missing' });
     const result = evalInDom('<button>Other</button>', snippet);
     expect(result).toBeNull();
+  });
+});
+
+describe('fuzzyCandidatesSnippet', () => {
+  it('returns up to 5 visible interactive labels', () => {
+    const snippet = fuzzyCandidatesSnippet();
+    const result = evalInDom(
+      `<button>One</button><button>Two</button><a href="#">Three</a>
+       <button style="display:none">Hidden</button>
+       <div role="button">Four</div>
+       <button>Five</button><button>Six</button>`,
+      snippet,
+    ) as string[];
+    expect(result).toHaveLength(5);
+    expect(result).toContain('One');
+    expect(result).toContain('Five');
+    expect(result).not.toContain('Hidden');
+  });
+
+  it('returns empty array when no interactive elements', () => {
+    const snippet = fuzzyCandidatesSnippet();
+    const result = evalInDom('<div>plain</div>', snippet);
+    expect(result).toEqual([]);
   });
 });

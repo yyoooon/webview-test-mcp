@@ -62,3 +62,15 @@ export function selectorSnippet(spec: Selector): string {
     return candidates[0] ?? null;
   })()`;
 }
+
+export function fuzzyCandidatesSnippet(): string {
+  return `(() => {
+    const all = [...document.querySelectorAll('button, a, [role=button]')];
+    const isVisible = ${VISIBLE_FILTER_JS};
+    return all
+      .filter(isVisible)
+      .slice(0, 5)
+      .map((el) => (el.textContent || '').trim())
+      .filter((t) => t.length > 0);
+  })()`;
+}
