@@ -55,6 +55,7 @@ yarn build     # tsc → dist/
 2. **스타일 검증은 스크린샷 대신 계산된 값.** `getComputedStyle`, `classList`, `getBoundingClientRect` 를 JSON으로 뽑아냅니다.
 3. **`webview_screenshot` 은 사람 눈 확인용.** 기능 검증에는 쓰지 않고, 쓸 때도 selector 옵션으로 element-scoped 캡처를 권장합니다.
 4. **순서.** `get_dom` 으로 구조 파악 → `evaluate` 로 체이닝 실행 → 필요 시 element-scoped screenshot. 단발성 조작에만 `click/type` 사용.
+5. **요구사항 미충족 시 자동 반복.** 한 라운드 실행 결과가 요구사항과 어긋나면 사용자에게 다시 묻지 말고 코드 수정 → HMR 반영 대기 → 동일 시나리오 재실행을 2~3회까지 자동으로 굴립니다. 같은 부분에서 막히거나 요구사항이 모호해질 때만 멈추고 보고합니다.
 
 자세한 동작 흐름은 `docs/` 아래 설계 스펙을 참고하세요.
 

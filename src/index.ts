@@ -17,6 +17,7 @@ import {
 import { definition as evaluateDef, handler as evaluateHandler } from './tools/evaluate.js';
 import { definition as waitDef, handler as waitHandler } from './tools/wait.js';
 import { definition as flowDef, flowHandler } from './tools/flow.js';
+import { definition as runScriptDef, handler as runScriptHandler } from './tools/run-script.js';
 import { state } from './state.js';
 import { removeForward } from './adb.js';
 
@@ -80,14 +81,39 @@ webview_evaluate로 getComputedStyle / classList / getBoundingClientRect 를 뽑
 - 풀스크린은 레이아웃 전반 QA에서만 (드물게)
 
 ## 4. 순서
-클릭/입력이 많은 시나리오는 webview_get_dom으로 한 번 구조 파악 → webview_evaluate로 체이닝 실행 → 필요 시 element-scoped screenshot. webview_click/type은 단발성 조작에만 사용.`;
+클릭/입력이 많은 시나리오는 webview_get_dom으로 한 번 구조 파악 → webview_evaluate로 체이닝 실행 → 필요 시 element-scoped screenshot. webview_click/type은 단발성 조작에만 사용.
+
+## 5. 요구사항 미충족 시 자동 반복
+한 라운드 실행 결과가 요구사항과 어긋나면 사용자에게 다시 묻지 말고 코드 수정 → HMR 반영 대기 → 동일 시나리오 재실행을 2~3회까지 자동으로 굴립니다. 같은 부분에서 막히거나 요구사항이 모호해질 때만 멈추고 보고합니다.
+
+## 6. 디바이스 선택 절차
+\`webview_connect\` 호출 전에 \`adb devices\`로 device 상태 기기 개수를 1회 확인하세요.
+
+- 1대: 조용히 진행 (추가 확인 불필요)
+- 2대 이상: Wi-Fi 디바이스(\`IP:port\` 형태) 우선 사용. Wi-Fi가 없으면 사용자에게 목록 제시 + 선택 질문
+- 0대: ADB 상태 확인 안내 (재연결 필요)
+
+같은 세션에서 이미 연결돼 있으면 재체크 불필요.
+
+## 7. 에러 진단
+\`webview_*\` 툴이 \`isError: true\`를 반환하면 에러 문자열만 그대로 사용자에게 전달하지 말고, 한 줄 진단 + 1~2개 구체 액션을 함께 제시하세요. 자동 재시도/재탐색 금지 (selector drift, timeout 등은 사용자 판단 영역).
+
+| 에러 (부분 일치) | 원인 | 다음 액션 |
+|---|---|---|
+| \`기기가 연결되어 있지 않습니다\` | ADB에 device 상태 기기 없음 | \`adb devices\` 결과 보여주기 + 재연결 절차 안내 (Wi-Fi면 \`adb connect <ip>\`, USB면 케이블/USB 디버깅 체크) |
+| \`WebView를 찾을 수 없습니다\` | \`webview_devtools_remote_*\` 소켓 없음 | 1) 앱 실행 중인지 묻기 2) **디버그 빌드** 여부 확인 (\`setWebContentsDebuggingEnabled(true)\` 필요). 네이티브 빌드 영역은 사용자에게 넘김 |
+| \`WebView가 N개 발견되었습니다\` | 한 앱에 WebView 여러 개 | 반환된 목록을 사용자에게 보여주고 \`socketIndex\` 선택 요청 |
+| \`요소를 찾을 수 없습니다\` (click/type) | selector 매칭 실패 | 응답의 \`similar\` 힌트 노출 + 바로 \`webview_get_dom\` 1회 호출로 현재 DOM 제시 → 사용자와 selector 재협의 |
+| \`시간 초과 (Nms): ... 미발견\` (wait_for) | 조건 미충족 | 해당 시점 DOM 또는 \`webview_evaluate\`로 상태 찍어보기. 네트워크 대기면 timeout 상향 제안, 클라이언트 로직이면 React Query 상태 등 확인 |
+
+선행조건 문제(ADB 미연결, 디버그 빌드 미적용)는 자동 해결 시도하지 말고 사용자에게 넘기세요. 매크로 재생 중 실패는 해당 단계까지의 snapshot까지만 리포트하고 멈춥니다.`;
 
 const server = new Server(
   { name: 'webview-test', version: '1.0.0' },
   { capabilities: { tools: {} }, instructions: INSTRUCTIONS },
 );
 
-const tools = [connectDef, screenshotDef, domDef, clickDefinition, typeDefinition, evaluateDef, waitDef, flowDef];
+const tools = [connectDef, screenshotDef, domDef, clickDefinition, typeDefinition, evaluateDef, waitDef, flowDef, runScriptDef];
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
@@ -111,6 +137,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return await waitHandler(args as any);
     case 'webview_flow':
       return await flowHandler(args as any);
+    case 'webview_run_script':
+      return await runScriptHandler(args as any);
     default:
       return {
         isError: true as const,
