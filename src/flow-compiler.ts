@@ -268,6 +268,24 @@ function compileCapture(spec: CaptureSpec, index: number): string {
   `;
 }
 
+const SNAPSHOT_JS = `(() => {
+  const isVis = ${VISIBLE_FILTER_JS};
+  const dlg = document.querySelector('[role=dialog]');
+  return {
+    url: location.pathname,
+    dialogPresent: !!dlg,
+    visibleButtons: [...document.querySelectorAll('button, a, [role=button]')]
+      .filter(isVis)
+      .slice(0, 10)
+      .map((el) => (el.textContent || '').trim())
+      .filter(Boolean),
+    headings: [...document.querySelectorAll('h1, h2, h3')]
+      .filter(isVis)
+      .slice(0, 5)
+      .map((h) => (h.textContent || '').trim()),
+  };
+})()`;
+
 export function compileFlow(input: FlowInput): string {
   const bail = input.bail ?? "on-error";
   const stepsCode = input.steps
@@ -288,7 +306,10 @@ ${bail === "on-error" ? `if (failed !== null) return;` : ""}`,
     })();
     const result = { marks, totalMs: Math.round(performance.now() - __t0) };
     if (captured !== null) result.captured = captured;
-    if (failed !== null) result.failedAt = failed;
+    if (failed !== null) {
+      result.failedAt = failed;
+      result.snapshot = ${SNAPSHOT_JS};
+    }
     return result;
   })()`;
 }

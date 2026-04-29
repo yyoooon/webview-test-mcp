@@ -102,3 +102,23 @@ describe("compileFlow — waitFor + capture", () => {
     expect(result.failedAt).toBe(0);
   });
 });
+
+describe("compileFlow — auto snapshot", () => {
+  it("attaches snapshot when click fails", async () => {
+    const result = (await evalFlow(
+      "<button>Cancel</button><button>Save</button>",
+      [{ click: { text: "Confirm" } }],
+    )) as { snapshot?: { visibleButtons: string[]; url: string } };
+    expect(result.snapshot).toBeDefined();
+    expect(result.snapshot!.visibleButtons).toContain("Save");
+    expect(result.snapshot!.url).toBe("/");
+  });
+
+  it("attaches snapshot when waitFor times out", async () => {
+    const result = (await evalFlow("<button>Hi</button>", [
+      { waitFor: { selector: "#never" }, timeout: 100 },
+    ])) as { snapshot?: { dialogPresent: boolean } };
+    expect(result.snapshot).toBeDefined();
+    expect(result.snapshot!.dialogPresent).toBe(false);
+  });
+});
