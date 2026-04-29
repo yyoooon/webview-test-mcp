@@ -58,6 +58,54 @@ yarn build     # tsc → dist/
 
 자세한 동작 흐름은 `docs/` 아래 설계 스펙을 참고하세요.
 
+## webview_flow (선언형 시나리오)
+
+multi-step 시나리오를 한 콜로 묶을 때 사용. JS를 직접 작성할 필요 없음.
+
+### Step 종류
+
+- `{ click: Selector }` — 가시 요소 클릭
+- `{ type: { selector, text } }` — 입력
+- `{ waitFor: WaitCond, timeout? }` — 조건 대기 (기본 5000ms)
+- `{ sleep: ms }` — 단순 대기
+- `{ goto: '/path' }` — pushState + popstate
+- `{ capture: CaptureSpec }` — 결과 캡처
+- `{ raw: 'JS expr' }` — escape hatch
+- `{ assert: { kind, value } }` — 단언
+
+### Selector
+- 문자열: CSS selector
+- `{ text: 'Confirm', within?: '[role=dialog]', tag?: 'button' }`
+- `{ testId: 'cta' }`
+
+### WaitCond
+- `{ selector: 'X' }` / `{ gone: 'X' }`
+- `{ text: 'X', within?: 'Y' }`
+- `{ role: 'dialog' }`
+- `{ url: '/path-prefix' }`
+
+### CaptureSpec
+- `url`, `scenario`, `toast`: boolean
+- `dialog`: `{ buttons?, text?, headings? }`
+- `storage`: `{ session?: string[], local?: string[] }`
+- `custom`: `{ key: 'JS expression' }`
+
+### 실패 시 자동 첨부
+첫 실패 step 발생 시 `snapshot: { url, dialogPresent, visibleButtons, headings }`이 응답에 자동 첨부됨.
+
+### 예시
+```json
+{
+  "steps": [
+    { "click": { "text": "Update My Program" } },
+    { "waitFor": { "role": "dialog" } },
+    { "click": { "text": "Confirm", "within": "[role=dialog]" } },
+    { "waitFor": { "gone": "[role=dialog]" } },
+    { "capture": { "url": true, "scenario": true } }
+  ]
+}
+```
+
 ## 개발
 
 ```bash
