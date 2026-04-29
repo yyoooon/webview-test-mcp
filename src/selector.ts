@@ -31,7 +31,7 @@ export function selectorSnippet(spec: Selector): string {
   if ('testId' in spec) {
     const tid = escapeStr(spec.testId);
     return `(() => {
-      const all = [...document.querySelectorAll('[data-testid="${tid}"]')];
+      const all = [...document.querySelectorAll('[data-testid=\\'${tid}\\']')];
       const visible = all.find(${VISIBLE_FILTER_JS});
       return visible ?? null;
     })()`;
@@ -56,6 +56,12 @@ export function selectorSnippet(spec: Selector): string {
       if (!t.includes('${text}')) return false;
       const childWithSameText = [...el.children].find((c) => (c.textContent || '').trim() === t);
       return !childWithSameText;
+    });
+    const isInteractive = (el) => el.matches('button, a, [role=button], input, [role=link]');
+    candidates.sort((a, b) => {
+      const ai = isInteractive(a) ? 0 : 1;
+      const bi = isInteractive(b) ? 0 : 1;
+      return ai - bi;
     });
     const exact = candidates.find((el) => (el.textContent || '').trim() === '${text}');
     if (exact) return exact;

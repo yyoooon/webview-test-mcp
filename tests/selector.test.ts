@@ -80,6 +80,15 @@ describe('selectorSnippet — testId', () => {
     );
     expect(result).toBe('Click');
   });
+
+  it('handles testId without double-quote injection', () => {
+    const snippet = selectorSnippet({ testId: 'cta-with-dash' });
+    const result = evalInDom(
+      '<button data-testid="cta-with-dash">Hi</button>',
+      `${snippet}?.textContent`,
+    );
+    expect(result).toBe('Hi');
+  });
 });
 
 describe('selectorSnippet — text', () => {
@@ -127,6 +136,24 @@ describe('selectorSnippet — text', () => {
     const snippet = selectorSnippet({ text: 'Missing' });
     const result = evalInDom('<button>Other</button>', snippet);
     expect(result).toBeNull();
+  });
+
+  it('prefers button over span for exact text match', () => {
+    const snippet = selectorSnippet({ text: 'Save' });
+    const result = evalInDom(
+      '<span>Save</span><button>Save</button>',
+      `${snippet}.tagName`,
+    );
+    expect(result).toBe('BUTTON');
+  });
+
+  it('falls back to non-interactive when no interactive matches', () => {
+    const snippet = selectorSnippet({ text: 'Label' });
+    const result = evalInDom(
+      '<span>Label</span>',
+      `${snippet}.tagName`,
+    );
+    expect(result).toBe('SPAN');
   });
 });
 
