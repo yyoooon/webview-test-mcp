@@ -1,4 +1,6 @@
 import { CdpClient } from './cdp.js';
+import { pickDevice, pickSocket } from './discovery.js';
+import { forwardPort } from './adb.js';
 
 export interface ConnectionState {
   cdp: CdpClient | null;
@@ -25,10 +27,22 @@ export function isConnected(): boolean {
   return state.cdp !== null && state.cdp.connected;
 }
 
+async function autoDiscoverAndConnect(): Promise<CdpClient> {
+  const device = await pickDevice();
+  const socket = await pickSocket(device.id);
+  const port = await forwardPort(socket.socketName, device.id);
+  const cdp = new CdpClient();
+  await cdp.connect(port);
+  state.cdp = cdp;
+  state.deviceId = device.id;
+  state.forwardedPort = port;
+  state.socketName = socket.socketName;
+  return cdp;
+}
+
 export async function ensureConnected(): Promise<CdpClient> {
   if (isConnected()) return state.cdp!;
 
-  // Auto-reconnect: if we had a previous connection, try once
   if (state.forwardedPort && state.socketName) {
     try {
       const cdp = new CdpClient();
@@ -36,9 +50,9 @@ export async function ensureConnected(): Promise<CdpClient> {
       state.cdp = cdp;
       return cdp;
     } catch {
-      // Reconnect failed — fall through to error
+      // fall through to auto-discover
     }
   }
 
-  throw new Error('WebView에 연결되어 있지 않습니다. webview_connect를 먼저 호출하세요.');
+  return await autoDiscoverAndConnect();
 }
