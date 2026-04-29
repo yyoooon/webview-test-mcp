@@ -16,10 +16,27 @@ import {
 } from './tools/interact.js';
 import { definition as evaluateDef, handler as evaluateHandler } from './tools/evaluate.js';
 import { definition as waitDef, handler as waitHandler } from './tools/wait.js';
+import { definition as flowDef, flowHandler } from './tools/flow.js';
 import { state } from './state.js';
 import { removeForward } from './adb.js';
 
 const INSTRUCTIONS = `이 서버는 Android WebView 자동화 툴입니다. 불필요한 왕복을 피하기 위해 다음 원칙을 반드시 지키세요.
+
+## 0. 다중 step 시나리오는 webview_flow 우선
+"클릭 → 대기 → 캡처" 같은 multi-step 시나리오는 webview_flow의 선언형 step 배열로 1콜에 묶으세요. JS를 직접 작성할 필요 없고, 실패 시 자동 snapshot이 첨부되어 다음 시도의 selector를 알려줍니다.
+
+예시:
+  webview_flow({
+    steps: [
+      { click: { text: 'Update My Program' } },
+      { waitFor: { role: 'dialog' } },
+      { click: { text: 'Confirm', within: '[role=dialog]' } },
+      { waitFor: { gone: '[role=dialog]' } },
+      { capture: { url: true, scenario: true } }
+    ]
+  })
+
+webview_evaluate는 flow가 표현하지 못하는 케이스 (성능 측정, 복잡한 DOM 트래버설)의 escape hatch로만 사용.
 
 ## 1. 기능 검증은 webview_evaluate 중심으로
 여러 상호작용을 연속으로 할 때는 webview_click을 여러 번 호출하지 말고, webview_evaluate 한 번 안에서 체이닝하세요.
@@ -70,7 +87,7 @@ const server = new Server(
   { capabilities: { tools: {} }, instructions: INSTRUCTIONS },
 );
 
-const tools = [connectDef, screenshotDef, domDef, clickDefinition, typeDefinition, evaluateDef, waitDef];
+const tools = [connectDef, screenshotDef, domDef, clickDefinition, typeDefinition, evaluateDef, waitDef, flowDef];
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
@@ -92,6 +109,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return await evaluateHandler(args as any);
     case 'webview_wait_for':
       return await waitHandler(args as any);
+    case 'webview_flow':
+      return await flowHandler(args as any);
     default:
       return {
         isError: true as const,

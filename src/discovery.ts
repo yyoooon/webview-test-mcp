@@ -7,7 +7,7 @@ interface Device {
 }
 
 interface Socket {
-  pid: number;
+  pid: string;
   socketName: string;
 }
 
