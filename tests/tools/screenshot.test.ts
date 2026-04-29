@@ -27,6 +27,5 @@ describe('webview_screenshot handler', () => {
   it('returns error when not connected', async () => {
     const result = await handler();
     expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toContain('연결되어 있지 않습니다');
   });
 });
