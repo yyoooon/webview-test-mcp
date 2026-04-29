@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Window } from 'happy-dom';
-import { VISIBLE_FILTER_JS } from '../src/selector.js';
+import { VISIBLE_FILTER_JS, selectorSnippet } from '../src/selector.js';
 
 function evalInDom(html: string, expr: string): unknown {
   const window = new Window({
@@ -42,5 +42,42 @@ describe('VISIBLE_FILTER_JS', () => {
       `${VISIBLE_FILTER_JS}(null)`,
     );
     expect(result).toBe(false);
+  });
+});
+
+describe('selectorSnippet — CSS', () => {
+  it('finds element by CSS selector', () => {
+    const snippet = selectorSnippet('#submit');
+    const result = evalInDom(
+      '<button id="submit">Go</button>',
+      `${snippet}.tagName`,
+    );
+    expect(result).toBe('BUTTON');
+  });
+
+  it('returns null when CSS selector matches no element', () => {
+    const snippet = selectorSnippet('#missing');
+    const result = evalInDom('<div></div>', snippet);
+    expect(result).toBeNull();
+  });
+
+  it('skips invisible matches', () => {
+    const snippet = selectorSnippet('button');
+    const result = evalInDom(
+      '<button style="display:none">Hidden</button><button>Visible</button>',
+      `${snippet}?.textContent`,
+    );
+    expect(result).toBe('Visible');
+  });
+});
+
+describe('selectorSnippet — testId', () => {
+  it('finds by data-testid', () => {
+    const snippet = selectorSnippet({ testId: 'cta' });
+    const result = evalInDom(
+      '<button data-testid="cta">Click</button>',
+      `${snippet}.textContent`,
+    );
+    expect(result).toBe('Click');
   });
 });

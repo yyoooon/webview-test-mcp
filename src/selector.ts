@@ -14,3 +14,28 @@ export const VISIBLE_FILTER_JS = `((el) => {
   if (cs.display === 'none' || cs.visibility === 'hidden') return false;
   return true;
 })`;
+
+function escapeStr(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
+}
+
+export function selectorSnippet(spec: Selector): string {
+  if (typeof spec === 'string') {
+    const css = escapeStr(spec);
+    return `(() => {
+      const all = [...document.querySelectorAll('${css}')];
+      const visible = all.find(${VISIBLE_FILTER_JS});
+      return visible ?? null;
+    })()`;
+  }
+  if ('testId' in spec) {
+    const tid = escapeStr(spec.testId);
+    return `(() => {
+      const all = [...document.querySelectorAll('[data-testid="${tid}"]')];
+      const visible = all.find(${VISIBLE_FILTER_JS});
+      return visible ?? null;
+    })()`;
+  }
+  // text branch — placeholder, filled in Task 4
+  return 'null';
+}
