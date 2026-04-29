@@ -81,3 +81,51 @@ describe('selectorSnippet — testId', () => {
     expect(result).toBe('Click');
   });
 });
+
+describe('selectorSnippet — text', () => {
+  it('finds by exact text match', () => {
+    const snippet = selectorSnippet({ text: 'Confirm' });
+    const result = evalInDom(
+      '<button>Cancel</button><button>Confirm</button>',
+      `${snippet}?.textContent`,
+    );
+    expect(result).toBe('Confirm');
+  });
+
+  it('falls back to partial match when no exact match', () => {
+    const snippet = selectorSnippet({ text: 'Confirm' });
+    const result = evalInDom(
+      '<button>Confirm changes</button>',
+      `${snippet}?.textContent`,
+    );
+    expect(result).toBe('Confirm changes');
+  });
+
+  it('prefers exact match over partial', () => {
+    const snippet = selectorSnippet({ text: 'Save' });
+    const result = evalInDom(
+      '<button>Save changes</button><button>Save</button>',
+      `${snippet}?.textContent`,
+    );
+    expect(result).toBe('Save');
+  });
+
+  it('scopes match to within container', () => {
+    const snippet = selectorSnippet({ text: 'Confirm', within: '[role=dialog]' });
+    const result = evalInDom(
+      `<button>Confirm</button>
+       <div role="dialog"><button>Confirm</button></div>`,
+      `(() => {
+        const el = ${snippet};
+        return el?.closest('[role=dialog]') ? 'in-dialog' : 'outside';
+      })()`,
+    );
+    expect(result).toBe('in-dialog');
+  });
+
+  it('returns null when text not found', () => {
+    const snippet = selectorSnippet({ text: 'Missing' });
+    const result = evalInDom('<button>Other</button>', snippet);
+    expect(result).toBeNull();
+  });
+});

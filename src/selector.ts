@@ -36,6 +36,29 @@ export function selectorSnippet(spec: Selector): string {
       return visible ?? null;
     })()`;
   }
-  // text branch — placeholder, filled in Task 4
-  return 'null';
+  // text spec
+  const text = escapeStr(spec.text);
+  const tagFilter = spec.tag
+    ? `el.tagName.toLowerCase() === '${escapeStr(spec.tag.toLowerCase())}'`
+    : 'true';
+  const root = spec.within
+    ? `document.querySelector('${escapeStr(spec.within)}')`
+    : 'document.body';
+  return `(() => {
+    const root = ${root};
+    if (!root) return null;
+    const all = [...root.querySelectorAll('*')];
+    const isVisible = ${VISIBLE_FILTER_JS};
+    const candidates = all.filter((el) => {
+      if (!isVisible(el)) return false;
+      if (!(${tagFilter})) return false;
+      const t = (el.textContent || '').trim();
+      if (!t.includes('${text}')) return false;
+      const childWithSameText = [...el.children].find((c) => (c.textContent || '').trim() === t);
+      return !childWithSameText;
+    });
+    const exact = candidates.find((el) => (el.textContent || '').trim() === '${text}');
+    if (exact) return exact;
+    return candidates[0] ?? null;
+  })()`;
 }
