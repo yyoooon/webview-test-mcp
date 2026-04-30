@@ -34,6 +34,26 @@ export interface AssertStep {
   };
 }
 
+export interface InspectTargetSpec {
+  selector: string;
+  /** getComputedStyle 프로퍼티 이름 배열. 예: ['fontSize', 'fontWeight', 'lineHeight', 'marginTop', 'gap'] */
+  style?: string[];
+  /** true면 textContent 포함 */
+  text?: boolean;
+  /** true면 classList 배열 포함 */
+  classList?: boolean;
+  /** true면 width/height/x/y 포함, 또는 ['width','height'] 같은 부분 선택 */
+  rect?: boolean | string[];
+  /** HTML 속성 이름 배열. 예: ['data-state', 'aria-label'] */
+  attr?: string[];
+}
+
+export interface InspectStep {
+  /** Figma spec 비교용. 한 콜에 여러 selector의 computed style/text/classList/rect 뽑기.
+   *  키는 자유롭게 지정 (예: title, badge, ctaButton). 결과는 같은 키로 평탄하게 반환. */
+  inspect: Record<string, InspectTargetSpec>;
+}
+
 export type FlowStep =
   | ClickStep
   | TypeStep
@@ -42,7 +62,8 @@ export type FlowStep =
   | GotoStep
   | CaptureStep
   | RawStep
-  | AssertStep;
+  | AssertStep
+  | InspectStep;
 
 export type WaitCond =
   | { selector: string }
@@ -139,7 +160,58 @@ function compileStep(step: FlowStep, index: number): string {
   if ("capture" in step) {
     return compileCapture(step.capture, index);
   }
+  if ("inspect" in step) {
+    return compileInspect(step.inspect, index);
+  }
   return `marks.push({ i: ${index}, kind: 'unknown', ok: false, error: 'INVALID_STEP' }); return { failed: ${index} };`;
+}
+
+function compileInspect(
+  spec: Record<string, InspectTargetSpec>,
+  index: number,
+): string {
+  const targetFragments = Object.entries(spec).map(([key, target]) => {
+    const sel = JSON.stringify(target.selector);
+    const styleProps = target.style ? JSON.stringify(target.style) : "null";
+    const attrNames = target.attr ? JSON.stringify(target.attr) : "null";
+    const rectKeys =
+      Array.isArray(target.rect)
+        ? JSON.stringify(target.rect)
+        : target.rect
+          ? JSON.stringify(["x", "y", "width", "height"])
+          : "null";
+    const wantText = target.text ? "true" : "false";
+    const wantClass = target.classList ? "true" : "false";
+    return `(() => {
+      const el = document.querySelector(${sel});
+      if (!el) { values[${JSON.stringify(key)}] = { __error: 'SELECTOR_NOT_FOUND', selector: ${sel} }; return; }
+      const out = {};
+      const styleProps = ${styleProps};
+      if (styleProps) {
+        const cs = getComputedStyle(el);
+        for (const p of styleProps) out[p] = cs[p];
+      }
+      if (${wantText}) out.text = (el.textContent || '').trim();
+      if (${wantClass}) out.classList = [...el.classList];
+      const rectKeys = ${rectKeys};
+      if (rectKeys) {
+        const r = el.getBoundingClientRect();
+        for (const k of rectKeys) out[k] = Math.round(r[k] * 100) / 100;
+      }
+      const attrNames = ${attrNames};
+      if (attrNames) {
+        for (const a of attrNames) out[a] = el.getAttribute(a);
+      }
+      values[${JSON.stringify(key)}] = out;
+    })();`;
+  });
+  return `
+    const __t = performance.now();
+    const values = {};
+    ${targetFragments.join("\n")}
+    captured = Object.assign({}, captured ?? {}, { inspect: values });
+    marks.push({ i: ${index}, kind: 'inspect', ok: true, ms: Math.round(performance.now() - __t) });
+  `;
 }
 
 function compileWaitFor(

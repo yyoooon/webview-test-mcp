@@ -6,13 +6,14 @@ import { FlowError } from '../errors.js';
 export const definition = {
   name: 'webview_flow',
   description:
-    '선언형 step 배열을 한 번에 실행합니다. multi-step 시나리오 (클릭 → 대기 → 캡처)를 1콜로 묶어 토큰/지연을 줄입니다. JS를 직접 짤 필요 없는 케이스에 우선 사용하고, 표현이 부족하면 webview_evaluate로 fallback.',
+    '선언형 step 배열을 한 번에 실행합니다. multi-step 시나리오 (클릭 → 대기 → 캡처/검증)를 1콜로 묶어 토큰/지연을 줄입니다. **디자인 적용 검증**에는 inspect step으로 여러 selector의 computed style을 한 번에 뽑아 Figma spec과 비교하세요. JS를 직접 짤 필요 없는 케이스에 우선 사용하고, 표현이 부족하면 webview_evaluate로 fallback.',
   inputSchema: {
     type: 'object' as const,
     properties: {
       steps: {
         type: 'array',
-        description: 'FlowStep 배열. 각 요소는 click/type/waitFor/sleep/goto/capture/raw/assert 중 하나.',
+        description:
+          'FlowStep 배열. 각 요소는 click/type/waitFor/sleep/goto/capture/raw/assert/inspect 중 하나. inspect 예: `{ inspect: { title: { selector: "h1", style: ["fontSize","fontWeight","lineHeight"], text: true } } }` → captured.inspect.title 으로 결과 반환.',
       },
       bail: {
         type: 'string',

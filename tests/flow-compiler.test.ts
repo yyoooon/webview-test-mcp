@@ -122,3 +122,93 @@ describe("compileFlow — auto snapshot", () => {
     expect(result.snapshot!.dialogPresent).toBe(false);
   });
 });
+
+describe("compileFlow — inspect step", () => {
+  it("captures computed style for selector", async () => {
+    const html = '<h1 id="t" style="font-size: 24px; font-weight: 500;">Hi</h1>';
+    const result = (await evalFlow(html, [
+      {
+        inspect: {
+          title: { selector: "#t", style: ["fontSize", "fontWeight"] },
+        },
+      },
+    ])) as {
+      marks: { kind: string; ok: boolean }[];
+      captured?: { inspect?: Record<string, Record<string, string>> };
+    };
+    expect(result.marks[0]).toMatchObject({ kind: "inspect", ok: true });
+    expect(result.captured?.inspect?.title?.fontSize).toBe("24px");
+    expect(result.captured?.inspect?.title?.fontWeight).toBe("500");
+  });
+
+  it("captures text + classList + rect when requested", async () => {
+    const html =
+      '<button id="cta" class="btn primary" style="width: 100px; height: 40px;">Next</button>';
+    const result = (await evalFlow(html, [
+      {
+        inspect: {
+          cta: {
+            selector: "#cta",
+            text: true,
+            classList: true,
+            rect: ["width", "height"],
+          },
+        },
+      },
+    ])) as {
+      captured?: {
+        inspect?: {
+          cta?: { text?: string; classList?: string[]; width?: number; height?: number };
+        };
+      };
+    };
+    expect(result.captured?.inspect?.cta?.text).toBe("Next");
+    expect(result.captured?.inspect?.cta?.classList).toEqual(["btn", "primary"]);
+    // happy-dom has no layout engine; rect returns numbers but values may be 0
+    expect(typeof result.captured?.inspect?.cta?.width).toBe("number");
+    expect(typeof result.captured?.inspect?.cta?.height).toBe("number");
+  });
+
+  it("emits __error when selector not found", async () => {
+    const result = (await evalFlow("<div></div>", [
+      { inspect: { missing: { selector: "#nope", style: ["color"] } } },
+    ])) as {
+      captured?: { inspect?: Record<string, { __error?: string }> };
+    };
+    expect(result.captured?.inspect?.missing?.__error).toBe("SELECTOR_NOT_FOUND");
+  });
+
+  it("supports multiple targets in one inspect step", async () => {
+    const html =
+      '<h1 id="a" style="color: red;">A</h1><p id="b" style="color: blue;">B</p>';
+    const result = (await evalFlow(html, [
+      {
+        inspect: {
+          h1: { selector: "#a", style: ["color"], text: true },
+          p: { selector: "#b", style: ["color"], text: true },
+        },
+      },
+    ])) as {
+      captured?: { inspect?: Record<string, { color?: string; text?: string }> };
+    };
+    expect(result.captured?.inspect?.h1?.color).toMatch(/red|rgb/);
+    expect(result.captured?.inspect?.h1?.text).toBe("A");
+    expect(result.captured?.inspect?.p?.color).toMatch(/blue|rgb/);
+    expect(result.captured?.inspect?.p?.text).toBe("B");
+  });
+
+  it("supports HTML attr extraction", async () => {
+    const html = '<button data-state="checked" aria-label="toggle">x</button>';
+    const result = (await evalFlow(html, [
+      {
+        inspect: {
+          sw: { selector: "button", attr: ["data-state", "aria-label"] },
+        },
+      },
+    ])) as {
+      captured?: { inspect?: { sw?: Record<string, string> } };
+    };
+    expect(result.captured?.inspect?.sw?.["data-state"]).toBe("checked");
+    expect(result.captured?.inspect?.sw?.["aria-label"]).toBe("toggle");
+  });
+});

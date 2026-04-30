@@ -75,6 +75,28 @@ webview_evaluate로 getComputedStyle / classList / getBoundingClientRect 를 뽑
     })
   \` })
 
+## 2-1. **디자인 적용 검증은 webview_flow의 inspect step**
+Figma spec과 화면 비교 시: \`goto → waitFor → inspect\`를 **1콜로 묶어서** 여러 selector의 computed style/text/classList/rect를 한 번에 뽑으세요. JS 직접 작성 불필요.
+
+예시 (디자인 1차 적용 후 검증):
+  webview_flow({
+    steps: [
+      { goto: '/onboarding' },
+      { waitFor: { selector: 'main h1' } },
+      {
+        inspect: {
+          title: { selector: 'h1', style: ['fontSize', 'fontWeight', 'lineHeight'], text: true },
+          badgeNumber: { selector: 'p span:first-child', style: ['fontWeight', 'color'] },
+          badgeLabel: { selector: 'p span:last-child', style: ['fontWeight'] },
+          backIcon: { selector: '[aria-label=뒤로가기] svg', rect: ['width', 'height'] },
+          ctaButton: { selector: 'button[type=button]:last-of-type', style: ['backgroundColor', 'borderRadius'] }
+        }
+      }
+    ]
+  })
+
+응답: \`captured.inspect.title = { fontSize: '24px', fontWeight: '500', text: 'Check what matters\\nright away' }\` 형태로 평탄하게 반환. Figma spec과 즉시 비교해서 다른 수치만 코드 수정 → 다시 같은 flow로 재검증.
+
 ## 3. webview_screenshot은 "사람 눈으로 확인해야 할 때"만
 - 기능/상태 검증에는 절대 쓰지 마세요 (원칙 1, 2로 대체)
 - 사용할 때는 반드시 selector 옵션으로 element-scoped 캡처
