@@ -58,3 +58,12 @@ export async function forwardPort(socketName: string, deviceId?: string): Promis
 export async function removeForward(port: number): Promise<void> {
   await execFile('adb', ['forward', '--remove', `tcp:${port}`]);
 }
+
+export async function inputTap(x: number, y: number, deviceId?: string): Promise<void> {
+  const ix = Math.round(x).toString();
+  const iy = Math.round(y).toString();
+  const args = deviceId
+    ? ['-s', deviceId, 'shell', 'input', 'tap', ix, iy]
+    : ['shell', 'input', 'tap', ix, iy];
+  await execFile('adb', args);
+}

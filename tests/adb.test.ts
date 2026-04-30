@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getConnectedDevices, findWebViewSockets, forwardPort, removeForward } from '../src/adb.js';
+import { getConnectedDevices, findWebViewSockets, forwardPort, removeForward, inputTap } from '../src/adb.js';
 import * as childProcess from 'child_process';
 
 vi.mock('child_process', () => ({
@@ -121,6 +121,30 @@ describe('removeForward', () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       'adb',
       ['forward', '--remove', 'tcp:9222'],
+      expect.any(Function),
+    );
+  });
+});
+
+describe('inputTap', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('runs adb shell input tap with rounded integer coordinates', async () => {
+    setupExecFile('');
+    await inputTap(123.4, 456.7);
+    expect(mockExecFile).toHaveBeenCalledWith(
+      'adb',
+      ['shell', 'input', 'tap', '123', '457'],
+      expect.any(Function),
+    );
+  });
+
+  it('passes deviceId when provided', async () => {
+    setupExecFile('');
+    await inputTap(50, 100, 'R5CT419BXHJ');
+    expect(mockExecFile).toHaveBeenCalledWith(
+      'adb',
+      ['-s', 'R5CT419BXHJ', 'shell', 'input', 'tap', '50', '100'],
       expect.any(Function),
     );
   });

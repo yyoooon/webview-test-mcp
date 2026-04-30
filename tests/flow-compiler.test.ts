@@ -212,3 +212,73 @@ describe("compileFlow — inspect step", () => {
     expect(result.captured?.inspect?.sw?.["aria-label"]).toBe("toggle");
   });
 });
+
+describe("compileFlow — osTap step", () => {
+  it("returns center coordinates scaled by devicePixelRatio", async () => {
+    const result = (await evalFlow('<button id="b">x</button>', [
+      {
+        raw: `
+          const btn = document.getElementById('b');
+          btn.getBoundingClientRect = () => ({ x: 100, y: 200, width: 50, height: 30, top: 200, left: 100, bottom: 230, right: 150 });
+          Object.defineProperty(window, 'devicePixelRatio', { value: 2, configurable: true });
+        `,
+      },
+      { osTap: "#b" },
+    ])) as {
+      marks: { kind: string; ok: boolean }[];
+      osTap?: { i: number; x: number; y: number; selector: unknown };
+    };
+    expect(result.marks[1]).toMatchObject({ kind: "osTap", ok: true });
+    expect(result.osTap).toBeDefined();
+    expect(result.osTap!.i).toBe(1);
+    // center = (100 + 25, 200 + 15) = (125, 215); * dpr 2 = (250, 430)
+    expect(result.osTap!.x).toBe(250);
+    expect(result.osTap!.y).toBe(430);
+  });
+
+  it("applies optional offset before scaling", async () => {
+    const result = (await evalFlow('<button id="b">x</button>', [
+      {
+        raw: `
+          const btn = document.getElementById('b');
+          btn.getBoundingClientRect = () => ({ x: 0, y: 0, width: 100, height: 50, top: 0, left: 0, bottom: 50, right: 100 });
+          Object.defineProperty(window, 'devicePixelRatio', { value: 1, configurable: true });
+        `,
+      },
+      { osTap: { selector: "#b", offsetX: 10, offsetY: -5 } },
+    ])) as { osTap?: { x: number; y: number } };
+    // center = (50, 25); +offset = (60, 20); *dpr 1 = (60, 20)
+    expect(result.osTap!.x).toBe(60);
+    expect(result.osTap!.y).toBe(20);
+  });
+
+  it("fails with SELECTOR_NOT_FOUND when target missing", async () => {
+    const result = (await evalFlow("<div></div>", [
+      { osTap: "#nope" },
+    ])) as {
+      marks: { ok: boolean; error?: string }[];
+      failedAt?: number;
+      osTap?: unknown;
+    };
+    expect(result.marks[0].ok).toBe(false);
+    expect(result.marks[0].error).toBe("SELECTOR_NOT_FOUND");
+    expect(result.failedAt).toBe(0);
+    expect(result.osTap).toBeUndefined();
+  });
+
+  it("halts flow at osTap (subsequent steps not compiled into same eval)", async () => {
+    const result = (await evalFlow('<button id="b">x</button>', [
+      {
+        raw: `
+          const btn = document.getElementById('b');
+          btn.getBoundingClientRect = () => ({ x: 0, y: 0, width: 10, height: 10, top: 0, left: 0, bottom: 10, right: 10 });
+        `,
+      },
+      { osTap: "#b" },
+      { sleep: 1000 },
+    ])) as { marks: { kind: string }[] };
+    // raw + osTap should run; sleep must NOT run (flow halted at osTap so handler can do ADB tap before resuming)
+    const kinds = result.marks.map((m) => m.kind);
+    expect(kinds).toEqual(["raw", "osTap"]);
+  });
+});

@@ -5,6 +5,12 @@ import {
   VISIBLE_FILTER_JS,
 } from "./selector.js";
 
+function isSelector(value: unknown): value is Selector {
+  if (typeof value === "string") return true;
+  if (value === null || typeof value !== "object") return false;
+  return "text" in value || "testId" in value;
+}
+
 export interface ClickStep {
   click: Selector;
 }
@@ -54,6 +60,12 @@ export interface InspectStep {
   inspect: Record<string, InspectTargetSpec>;
 }
 
+export interface OsTapStep {
+  /** OS-level tap via ADB. WebView가 합성 click 이벤트로 띄우지 못하는 키보드/네이티브 인풋 같은 케이스에 사용.
+   *  실제 ADB shell input tap은 flowHandler가 좌표를 받은 뒤 Node 레이어에서 실행. */
+  osTap: Selector | { selector: Selector; offsetX?: number; offsetY?: number };
+}
+
 export type FlowStep =
   | ClickStep
   | TypeStep
@@ -63,7 +75,8 @@ export type FlowStep =
   | CaptureStep
   | RawStep
   | AssertStep
-  | InspectStep;
+  | InspectStep
+  | OsTapStep;
 
 export type WaitCond =
   | { selector: string }
@@ -163,7 +176,32 @@ function compileStep(step: FlowStep, index: number): string {
   if ("inspect" in step) {
     return compileInspect(step.inspect, index);
   }
+  if ("osTap" in step) {
+    return compileOsTap(step.osTap, index);
+  }
   return `marks.push({ i: ${index}, kind: 'unknown', ok: false, error: 'INVALID_STEP' }); return { failed: ${index} };`;
+}
+
+function compileOsTap(spec: OsTapStep["osTap"], index: number): string {
+  const { selector, offsetX, offsetY } = isSelector(spec)
+    ? { selector: spec, offsetX: 0, offsetY: 0 }
+    : { selector: spec.selector, offsetX: spec.offsetX ?? 0, offsetY: spec.offsetY ?? 0 };
+  const sel = selectorSnippet(selector);
+  return `
+    const __t = performance.now();
+    const __el = ${sel};
+    if (!__el) {
+      const __sim = ${fuzzyCandidatesSnippet()};
+      marks.push({ i: ${index}, kind: 'osTap', ok: false, ms: Math.round(performance.now() - __t), error: 'SELECTOR_NOT_FOUND', similar: __sim });
+      return { failed: ${index} };
+    }
+    const __r = __el.getBoundingClientRect();
+    const __dpr = window.devicePixelRatio || 1;
+    const __cx = Math.round((__r.x + __r.width / 2 + ${offsetX}) * __dpr);
+    const __cy = Math.round((__r.y + __r.height / 2 + ${offsetY}) * __dpr);
+    marks.push({ i: ${index}, kind: 'osTap', ok: true, ms: Math.round(performance.now() - __t), x: __cx, y: __cy });
+    return { osTap: { i: ${index}, x: __cx, y: __cy, selector: ${JSON.stringify(selector)} } };
+  `;
 }
 
 function compileInspect(
@@ -358,12 +396,22 @@ const SNAPSHOT_JS = `(() => {
   };
 })()`;
 
-export function compileFlow(input: FlowInput): string {
+export interface CompileFlowOptions {
+  /** 0이 아니면 stepsCode의 step 인덱스를 startIndex 만큼 오프셋해서 컴파일. flowHandler가 osTap 후 잔여 step을 재컴파일할 때 사용. */
+  startIndex?: number;
+}
+
+export function compileFlow(input: FlowInput, options: CompileFlowOptions = {}): string {
   const bail = input.bail ?? "on-error";
+  const startIndex = options.startIndex ?? 0;
   const stepsCode = input.steps
     .map(
       (step, i) =>
-        `await (async () => { ${compileStep(step, i)} })().then((r) => { if (r && r.failed !== undefined) failed = r.failed; });
+        `await (async () => { ${compileStep(step, i + startIndex)} })().then((r) => {
+          if (r && r.failed !== undefined) failed = r.failed;
+          if (r && r.osTap !== undefined) osTap = r.osTap;
+        });
+        if (osTap !== null) return;
 ${bail === "on-error" ? `if (failed !== null) return;` : ""}`,
     )
     .join("\n");
@@ -373,11 +421,13 @@ ${bail === "on-error" ? `if (failed !== null) return;` : ""}`,
     const marks = [];
     let captured = null;
     let failed = null;
+    let osTap = null;
     await (async () => {
       ${stepsCode}
     })();
     const result = { marks, totalMs: Math.round(performance.now() - __t0) };
     if (captured !== null) result.captured = captured;
+    if (osTap !== null) result.osTap = osTap;
     if (failed !== null) {
       result.failedAt = failed;
       result.snapshot = ${SNAPSHOT_JS};
