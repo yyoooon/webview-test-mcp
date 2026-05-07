@@ -52,11 +52,7 @@ export async function pickSocket(
     }
     return s;
   }
-  throw new FlowError(ErrorCode.MULTIPLE_WEBVIEWS, undefined, {
-    sockets: sockets.map((s, i) => ({
-      index: i,
-      pid: s.pid,
-      socketName: s.socketName,
-    })),
-  });
+  // Multiple sockets but no explicit index: default to 0.
+  // 대부분 첫 socket이 메인 WebView. 다른 걸 원하면 socketIndex로 명시.
+  return sockets[0];
 }

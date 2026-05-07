@@ -67,12 +67,21 @@ describe("pickSocket", () => {
     expect(out.pid).toBe(1234);
   });
 
-  it("throws MULTIPLE_WEBVIEWS when multiple and no index", async () => {
+  it("defaults to index 0 when multiple and no index given", async () => {
     vi.mocked(adb.findWebViewSockets).mockResolvedValue([
       { pid: 1, socketName: "a" } as any,
       { pid: 2, socketName: "b" } as any,
     ]);
-    await expect(pickSocket("XYZ")).rejects.toMatchObject({
+    const out = await pickSocket("XYZ");
+    expect(out.pid).toBe(1);
+  });
+
+  it("throws MULTIPLE_WEBVIEWS when explicit index out of range", async () => {
+    vi.mocked(adb.findWebViewSockets).mockResolvedValue([
+      { pid: 1, socketName: "a" } as any,
+      { pid: 2, socketName: "b" } as any,
+    ]);
+    await expect(pickSocket("XYZ", 5)).rejects.toMatchObject({
       code: ErrorCode.MULTIPLE_WEBVIEWS,
     });
   });

@@ -61,7 +61,7 @@ describe("webview_connect handler", () => {
     expect(text).toContain("NO_WEBVIEW");
   });
 
-  it("lists sockets when multiple found", async () => {
+  it("auto-connects to first socket when multiple found and no socketIndex", async () => {
     mockAdb.getConnectedDevices.mockResolvedValue([
       { id: "R5CT419BXHJ", state: "device" },
     ]);
@@ -69,10 +69,16 @@ describe("webview_connect handler", () => {
       { pid: "12345", socketName: "webview_devtools_remote_12345" },
       { pid: "67890", socketName: "webview_devtools_remote_67890" },
     ]);
+    mockAdb.forwardPort.mockResolvedValue(9222);
+
     const result = await handler({});
+    expect(result.isError).toBeUndefined();
+    expect(mockAdb.forwardPort).toHaveBeenCalledWith(
+      "webview_devtools_remote_12345",
+      "R5CT419BXHJ",
+    );
     const text = (result.content[0] as { text: string }).text;
     expect(text).toContain("12345");
-    expect(text).toContain("67890");
   });
 
   it("connects to specific socket when socketIndex provided", async () => {
