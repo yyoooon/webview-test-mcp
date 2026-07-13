@@ -11,9 +11,19 @@ export class CdpClient {
   private messageId = 0;
   private pending = new Map<number, PendingRequest>();
   private _connected = false;
+  private eventHandlers = new Map<string, Set<(params: Record<string, unknown>) => void>>();
 
   get connected(): boolean {
     return this._connected;
+  }
+
+  on(method: string, handler: (params: Record<string, unknown>) => void): void {
+    if (!this.eventHandlers.has(method)) this.eventHandlers.set(method, new Set());
+    this.eventHandlers.get(method)!.add(handler);
+  }
+
+  off(method: string, handler: (params: Record<string, unknown>) => void): void {
+    this.eventHandlers.get(method)?.delete(handler);
   }
 
   async connect(port: number): Promise<void> {
@@ -42,7 +52,14 @@ export class CdpClient {
           id?: number;
           result?: unknown;
           error?: { code: number; message: string };
+          method?: string;
+          params?: Record<string, unknown>;
         };
+        if (msg.method !== undefined) {
+          const handlers = this.eventHandlers.get(msg.method);
+          if (handlers) for (const h of handlers) h(msg.params ?? {});
+          return;
+        }
         if (msg.id !== undefined) {
           const p = this.pending.get(msg.id);
           if (p) {

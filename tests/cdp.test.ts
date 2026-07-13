@@ -103,4 +103,37 @@ describe('CdpClient', () => {
     ws._emit('close');
     expect(client.connected).toBe(false);
   });
+
+  it('dispatches CDP events to registered handlers', async () => {
+    const connectPromise = client.connect(9222);
+    await vi.waitFor(() => {
+      const ws = vi.mocked(WebSocket).mock.results[0]?.value;
+      ws._emit('open');
+    });
+    await connectPromise;
+
+    const ws = vi.mocked(WebSocket).mock.results[0].value;
+    const handler = vi.fn();
+    client.on('Runtime.consoleAPICalled', handler);
+    ws._emit('message', JSON.stringify({ method: 'Runtime.consoleAPICalled', params: { type: 'error' } }));
+
+    expect(handler).toHaveBeenCalledWith({ type: 'error' });
+  });
+
+  it('off unregisters an event handler', async () => {
+    const connectPromise = client.connect(9222);
+    await vi.waitFor(() => {
+      const ws = vi.mocked(WebSocket).mock.results[0]?.value;
+      ws._emit('open');
+    });
+    await connectPromise;
+
+    const ws = vi.mocked(WebSocket).mock.results[0].value;
+    const handler = vi.fn();
+    client.on('Runtime.consoleAPICalled', handler);
+    client.off('Runtime.consoleAPICalled', handler);
+    ws._emit('message', JSON.stringify({ method: 'Runtime.consoleAPICalled', params: {} }));
+
+    expect(handler).not.toHaveBeenCalled();
+  });
 });
