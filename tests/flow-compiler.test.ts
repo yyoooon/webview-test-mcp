@@ -7,6 +7,12 @@ async function evalFlow(html: string, steps: unknown[]): Promise<unknown> {
   window.document.body.innerHTML = html;
   if (!window.performance)
     (window as any).performance = { now: () => Date.now() };
+  // happy-dom 미구현 API 폴리필 (동작 검증이 아니라 컴파일 결과 검증이 목적)
+  window.eval(`
+    if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = function () {};
+    if (!Element.prototype.scrollBy) Element.prototype.scrollBy = function () {};
+    if (!window.scrollBy) window.scrollBy = function () {};
+  `);
   const expr = compileFlow({ steps: steps as any });
   return await window.eval(expr);
 }
@@ -280,5 +286,37 @@ describe("compileFlow — osTap step", () => {
     // raw + osTap should run; sleep must NOT run (flow halted at osTap so handler can do ADB tap before resuming)
     const kinds = result.marks.map((m) => m.kind);
     expect(kinds).toEqual(["raw", "osTap"]);
+  });
+});
+
+describe("compileFlow — scroll", () => {
+  it("scroll to selector calls scrollIntoView and records ok", async () => {
+    const result = (await evalFlow('<div id="target">bottom</div>', [
+      { scroll: { to: "#target" } },
+    ])) as { marks: { kind: string; ok: boolean }[] };
+    expect(result.marks[0]).toMatchObject({ kind: "scroll", ok: true });
+  });
+
+  it("scroll to missing selector fails with SELECTOR_NOT_FOUND", async () => {
+    const result = (await evalFlow("<div></div>", [
+      { scroll: { to: "#missing" } },
+    ])) as { marks: { ok: boolean; error?: string }[]; failedAt?: number };
+    expect(result.marks[0].error).toBe("SELECTOR_NOT_FOUND");
+    expect(result.failedAt).toBe(0);
+  });
+
+  it("scroll by delta on window records ok", async () => {
+    const result = (await evalFlow("<div></div>", [
+      { scroll: { by: { y: 500 } } },
+    ])) as { marks: { kind: string; ok: boolean }[] };
+    expect(result.marks[0]).toMatchObject({ kind: "scroll", ok: true });
+  });
+
+  it("scroll by delta with missing container fails", async () => {
+    const result = (await evalFlow("<div></div>", [
+      { scroll: { by: { y: 100 }, container: "#list" } },
+    ])) as { marks: { ok: boolean; error?: string }[]; failedAt?: number };
+    expect(result.marks[0].error).toBe("SELECTOR_NOT_FOUND");
+    expect(result.failedAt).toBe(0);
   });
 });

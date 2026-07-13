@@ -66,6 +66,13 @@ export interface OsTapStep {
   osTap: Selector | { selector: Selector; offsetX?: number; offsetY?: number };
 }
 
+export interface ScrollStep {
+  /** 페이지 내 JS 스크롤. to: 요소로 scrollIntoView / by: 픽셀 단위 (container 없으면 window). */
+  scroll:
+    | { to: Selector; block?: "start" | "center" | "end" | "nearest" }
+    | { by: { x?: number; y?: number }; container?: string };
+}
+
 export type FlowStep =
   | ClickStep
   | TypeStep
@@ -76,7 +83,8 @@ export type FlowStep =
   | RawStep
   | AssertStep
   | InspectStep
-  | OsTapStep;
+  | OsTapStep
+  | ScrollStep;
 
 export type WaitCond =
   | { selector: string }
@@ -179,6 +187,9 @@ function compileStep(step: FlowStep, index: number): string {
   if ("osTap" in step) {
     return compileOsTap(step.osTap, index);
   }
+  if ("scroll" in step) {
+    return compileScroll(step.scroll, index);
+  }
   return `marks.push({ i: ${index}, kind: 'unknown', ok: false, error: 'INVALID_STEP' }); return { failed: ${index} };`;
 }
 
@@ -201,6 +212,43 @@ function compileOsTap(spec: OsTapStep["osTap"], index: number): string {
     const __cy = Math.round((__r.y + __r.height / 2 + ${offsetY}) * __dpr);
     marks.push({ i: ${index}, kind: 'osTap', ok: true, ms: Math.round(performance.now() - __t), x: __cx, y: __cy });
     return { osTap: { i: ${index}, x: __cx, y: __cy, selector: ${JSON.stringify(selector)} } };
+  `;
+}
+
+function compileScroll(spec: ScrollStep["scroll"], index: number): string {
+  if ("to" in spec) {
+    const sel = selectorSnippet(spec.to);
+    const block = JSON.stringify(spec.block ?? "center");
+    return `
+      const __t = performance.now();
+      const __el = ${sel};
+      if (!__el) {
+        const __sim = ${fuzzyCandidatesSnippet()};
+        marks.push({ i: ${index}, kind: 'scroll', ok: false, ms: Math.round(performance.now() - __t), error: 'SELECTOR_NOT_FOUND', similar: __sim });
+        return { failed: ${index} };
+      }
+      __el.scrollIntoView({ block: ${block}, behavior: 'instant' });
+      marks.push({ i: ${index}, kind: 'scroll', ok: true, ms: Math.round(performance.now() - __t) });
+    `;
+  }
+  const x = spec.by.x ?? 0;
+  const y = spec.by.y ?? 0;
+  if (spec.container) {
+    return `
+      const __t = performance.now();
+      const __c = document.querySelector(${escJson(spec.container)});
+      if (!__c) {
+        marks.push({ i: ${index}, kind: 'scroll', ok: false, ms: Math.round(performance.now() - __t), error: 'SELECTOR_NOT_FOUND' });
+        return { failed: ${index} };
+      }
+      __c.scrollBy({ left: ${x}, top: ${y}, behavior: 'instant' });
+      marks.push({ i: ${index}, kind: 'scroll', ok: true, ms: Math.round(performance.now() - __t) });
+    `;
+  }
+  return `
+    const __t = performance.now();
+    window.scrollBy({ left: ${x}, top: ${y}, behavior: 'instant' });
+    marks.push({ i: ${index}, kind: 'scroll', ok: true, ms: Math.round(performance.now() - __t) });
   `;
 }
 
