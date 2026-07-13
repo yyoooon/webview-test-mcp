@@ -187,6 +187,16 @@ describe('inputKeyEvent', () => {
     );
   });
 
+  it('normalizes lowercase keycode_ prefix instead of double-prefixing', async () => {
+    setupExecFile('');
+    await inputKeyEvent('keycode_back');
+    expect(mockExecFile).toHaveBeenCalledWith(
+      'adb',
+      ['shell', 'input', 'keyevent', 'KEYCODE_BACK'],
+      expect.any(Function),
+    );
+  });
+
   it('passes through already-prefixed keycode', async () => {
     setupExecFile('');
     await inputKeyEvent('KEYCODE_ENTER', 'DEV1');

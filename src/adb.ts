@@ -83,7 +83,8 @@ export async function inputSwipe(
 }
 
 export async function inputKeyEvent(key: string, deviceId?: string): Promise<void> {
-  const keycode = key.startsWith('KEYCODE_') ? key : `KEYCODE_${key.toUpperCase()}`;
+  const upper = key.toUpperCase();
+  const keycode = upper.startsWith('KEYCODE_') ? upper : `KEYCODE_${upper}`;
   if (!/^KEYCODE_[A-Z0-9_]+$/.test(keycode)) {
     throw new Error(`유효하지 않은 keycode: ${key}`);
   }
