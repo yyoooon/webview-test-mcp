@@ -7,7 +7,8 @@ import { ConsoleEntry } from '../console-log.js';
 
 type ControlSignal =
   | { type: 'osTap'; i: number; x: number; y: number; selector: unknown }
-  | { type: 'osSwipe'; i: number; x1: number; y1: number; x2: number; y2: number; durationMs: number };
+  | { type: 'osSwipe'; i: number; x1: number; y1: number; x2: number; y2: number; durationMs: number }
+  | { type: 'osKey'; i: number; key: string };
 
 interface SegmentResult {
   marks: unknown[];
@@ -99,6 +100,8 @@ export async function flowHandler(args: Partial<FlowInput>) {
           await inputTap(c.x, c.y, state.deviceId ?? undefined);
         } else if (c.type === 'osSwipe') {
           await inputSwipe(c.x1, c.y1, c.x2, c.y2, c.durationMs, state.deviceId ?? undefined);
+        } else if (c.type === 'osKey') {
+          await inputKeyEvent(c.key, state.deviceId ?? undefined);
         }
         const consumedCount = c.i - startIndex + 1;
         remainingSteps = remainingSteps.slice(consumedCount);

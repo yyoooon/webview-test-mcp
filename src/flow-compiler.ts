@@ -82,6 +82,11 @@ export interface OsSwipeStep {
   };
 }
 
+export interface OsKeyStep {
+  /** ADB keyevent. 'BACK', 'ENTER', 'HOME' 또는 'KEYCODE_BACK' 형식. flowHandler가 ADB로 실행. */
+  osKey: string;
+}
+
 export type FlowStep =
   | ClickStep
   | TypeStep
@@ -94,7 +99,8 @@ export type FlowStep =
   | InspectStep
   | OsTapStep
   | ScrollStep
-  | OsSwipeStep;
+  | OsSwipeStep
+  | OsKeyStep;
 
 export type WaitCond =
   | { selector: string }
@@ -202,6 +208,12 @@ function compileStep(step: FlowStep, index: number): string {
   }
   if ("osSwipe" in step) {
     return compileOsSwipe(step.osSwipe, index);
+  }
+  if ("osKey" in step) {
+    return `
+      marks.push({ i: ${index}, kind: 'osKey', ok: true, ms: 0, key: ${JSON.stringify(step.osKey)} });
+      return { control: { type: 'osKey', i: ${index}, key: ${JSON.stringify(step.osKey)} } };
+    `;
   }
   return `marks.push({ i: ${index}, kind: 'unknown', ok: false, error: 'INVALID_STEP' }); return { failed: ${index} };`;
 }

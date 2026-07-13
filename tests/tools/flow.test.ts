@@ -153,6 +153,27 @@ describe('flowHandler — osTap orchestration', () => {
   });
 });
 
+describe('flowHandler — osKey orchestration', () => {
+  beforeEach(() => { vi.clearAllMocks(); stateModule.resetState(); });
+
+  it('executes adb inputKeyEvent for osKey control', async () => {
+    const segment1 = {
+      marks: [{ i: 0, kind: 'osKey', ok: true, ms: 0, key: 'BACK' }],
+      totalMs: 0,
+      control: { type: 'osKey', i: 0, key: 'BACK' },
+    };
+    const segment2 = { marks: [{ i: 1, kind: 'sleep', ok: true, ms: 1 }], totalMs: 1 };
+    stateModule.state.cdp = makeFakeCdpQueue([segment1, segment2]) as any;
+    stateModule.state.deviceId = 'TESTDEV';
+
+    const result = await flowHandler({ steps: [{ osKey: 'BACK' }, { sleep: 1 }] as any });
+
+    expect(adbModule.inputKeyEvent).toHaveBeenCalledWith('BACK', 'TESTDEV');
+    const parsed = JSON.parse((result.content[0] as { text: string }).text);
+    expect(parsed.marks.map((m: any) => m.kind)).toEqual(['osKey', 'sleep']);
+  });
+});
+
 describe('flowHandler — console attachment', () => {
   beforeEach(() => { vi.clearAllMocks(); stateModule.resetState(); });
 

@@ -348,3 +348,15 @@ describe("compileFlow — scroll", () => {
     expect(result.failedAt).toBe(0);
   });
 });
+
+describe("compileFlow — osKey", () => {
+  it("returns osKey control signal and halts segment", async () => {
+    const result = (await evalFlow("<div></div>", [
+      { osKey: "BACK" },
+      { sleep: 1 },
+    ])) as { marks: { kind: string; ok: boolean }[]; control?: { type: string; key: string } };
+    expect(result.marks).toHaveLength(1);
+    expect(result.marks[0]).toMatchObject({ kind: "osKey", ok: true });
+    expect(result.control).toMatchObject({ type: "osKey", key: "BACK", i: 0 });
+  });
+});
