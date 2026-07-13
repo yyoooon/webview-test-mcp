@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { handler } from "../../src/tools/connect.js";
 import * as adb from "../../src/adb.js";
+import * as discovery from "../../src/discovery.js";
 import * as stateModule from "../../src/state.js";
 import { CdpClient } from "../../src/cdp.js";
 
 vi.mock("../../src/adb.js");
+vi.mock("../../src/discovery.js", { spy: true });
 vi.mock("../../src/cdp.js", () => ({
   CdpClient: vi.fn().mockImplementation(() => ({
     connect: vi.fn().mockResolvedValue(undefined),
@@ -97,5 +99,47 @@ describe("webview_connect handler", () => {
       "webview_devtools_remote_67890",
       "R5CT419BXHJ",
     );
+  });
+
+  it("forwards app param to pickSocket", async () => {
+    mockAdb.getConnectedDevices.mockResolvedValue([
+      { id: "R5CT419BXHJ", state: "device" },
+    ]);
+    mockAdb.findWebViewSockets.mockResolvedValue([
+      { pid: "12345", socketName: "webview_devtools_remote_12345" },
+      { pid: "67890", socketName: "webview_devtools_remote_67890" },
+    ]);
+    mockAdb.getProcessName.mockImplementation(async (pid) =>
+      pid === "12345" ? "com.other.app" : "com.huray.healthapp",
+    );
+    mockAdb.forwardPort.mockResolvedValue(9222);
+
+    const result = await handler({ app: "huray" });
+    expect(result.isError).toBeUndefined();
+    expect(vi.mocked(discovery.pickSocket)).toHaveBeenCalledWith(
+      "R5CT419BXHJ",
+      undefined,
+      "huray",
+    );
+    expect(mockAdb.forwardPort).toHaveBeenCalledWith(
+      "webview_devtools_remote_67890",
+      "R5CT419BXHJ",
+    );
+  });
+
+  it("shows app name next to PID in success text", async () => {
+    mockAdb.getConnectedDevices.mockResolvedValue([
+      { id: "R5CT419BXHJ", state: "device" },
+    ]);
+    mockAdb.findWebViewSockets.mockResolvedValue([
+      { pid: "12345", socketName: "webview_devtools_remote_12345" },
+    ]);
+    mockAdb.getProcessName.mockResolvedValue("com.huray.healthapp");
+    mockAdb.forwardPort.mockResolvedValue(9222);
+
+    const result = await handler({});
+    expect(result.isError).toBeUndefined();
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("PID: 12345 (com.huray.healthapp)");
   });
 });
