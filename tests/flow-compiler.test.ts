@@ -7,12 +7,6 @@ async function evalFlow(html: string, steps: unknown[]): Promise<unknown> {
   window.document.body.innerHTML = html;
   if (!window.performance)
     (window as any).performance = { now: () => Date.now() };
-  // happy-dom 미구현 API 폴리필 (동작 검증이 아니라 컴파일 결과 검증이 목적)
-  window.eval(`
-    if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = function () {};
-    if (!Element.prototype.scrollBy) Element.prototype.scrollBy = function () {};
-    if (!window.scrollBy) window.scrollBy = function () {};
-  `);
   const expr = compileFlow({ steps: steps as any });
   return await window.eval(expr);
 }
