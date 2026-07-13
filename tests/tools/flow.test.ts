@@ -174,6 +174,36 @@ describe('flowHandler — osKey orchestration', () => {
   });
 });
 
+describe('flowHandler — bail continue with control step after failure', () => {
+  beforeEach(() => { vi.clearAllMocks(); stateModule.resetState(); });
+
+  it('preserves failedAt/snapshot from a segment that also carries a control signal', async () => {
+    const segment1 = {
+      marks: [
+        { i: 0, kind: 'click', ok: false, ms: 1, error: 'SELECTOR_NOT_FOUND' },
+        { i: 1, kind: 'osKey', ok: true, ms: 0, key: 'BACK' },
+      ],
+      totalMs: 1,
+      failedAt: 0,
+      snapshot: { url: '/', dialogPresent: false, visibleButtons: [], headings: [] },
+      control: { type: 'osKey', i: 1, key: 'BACK' },
+    };
+    const segment2 = { marks: [{ i: 2, kind: 'sleep', ok: true, ms: 1 }], totalMs: 1 };
+    stateModule.state.cdp = makeFakeCdpQueue([segment1, segment2]) as any;
+    stateModule.state.deviceId = 'TESTDEV';
+
+    const result = await flowHandler({
+      bail: 'continue',
+      steps: [{ click: '#missing' }, { osKey: 'BACK' }, { sleep: 1 }] as any,
+    });
+
+    expect(adbModule.inputKeyEvent).toHaveBeenCalledWith('BACK', 'TESTDEV');
+    const parsed = JSON.parse((result.content[0] as { text: string }).text);
+    expect(parsed.failedAt).toBe(0);
+    expect(parsed.snapshot).toBeDefined();
+  });
+});
+
 describe('flowHandler — nav orchestration', () => {
   beforeEach(() => { vi.clearAllMocks(); stateModule.resetState(); });
 

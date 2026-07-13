@@ -111,6 +111,11 @@ export async function flowHandler(args: Partial<FlowInput>) {
           }
           await waitForPageLoad(cdp, c.timeoutMs);
         }
+        if (segment.failedAt !== undefined) {
+          failedAt = segment.failedAt;
+          snapshot = segment.snapshot;
+        }
+
         const consumedCount = c.i - startIndex + 1;
         remainingSteps = remainingSteps.slice(consumedCount);
         startIndex = c.i + 1;
