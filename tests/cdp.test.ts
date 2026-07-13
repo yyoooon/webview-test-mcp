@@ -120,6 +120,30 @@ describe('CdpClient', () => {
     expect(handler).toHaveBeenCalledWith({ type: 'error' });
   });
 
+  it('continues dispatching to remaining handlers when one throws', async () => {
+    const connectPromise = client.connect(9222);
+    await vi.waitFor(() => {
+      const ws = vi.mocked(WebSocket).mock.results[0]?.value;
+      ws._emit('open');
+    });
+    await connectPromise;
+
+    const ws = vi.mocked(WebSocket).mock.results[0].value;
+    const throwingHandler = vi.fn(() => {
+      throw new Error('handler boom');
+    });
+    const handler = vi.fn();
+    client.on('Runtime.consoleAPICalled', throwingHandler);
+    client.on('Runtime.consoleAPICalled', handler);
+
+    expect(() => {
+      ws._emit('message', JSON.stringify({ method: 'Runtime.consoleAPICalled', params: { type: 'log' } }));
+    }).not.toThrow();
+
+    expect(throwingHandler).toHaveBeenCalled();
+    expect(handler).toHaveBeenCalledWith({ type: 'log' });
+  });
+
   it('off unregisters an event handler', async () => {
     const connectPromise = client.connect(9222);
     await vi.waitFor(() => {

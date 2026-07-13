@@ -57,7 +57,15 @@ export class CdpClient {
         };
         if (msg.method !== undefined) {
           const handlers = this.eventHandlers.get(msg.method);
-          if (handlers) for (const h of handlers) h(msg.params ?? {});
+          if (handlers) {
+            for (const h of handlers) {
+              try {
+                h(msg.params ?? {});
+              } catch {
+                // 이벤트 핸들러 예외가 ws 콜백/다른 핸들러를 죽이지 않도록 격리
+              }
+            }
+          }
           return;
         }
         if (msg.id !== undefined) {
