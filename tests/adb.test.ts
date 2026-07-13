@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getConnectedDevices, findWebViewSockets, forwardPort, removeForward, inputTap } from '../src/adb.js';
+import { getConnectedDevices, findWebViewSockets, forwardPort, removeForward, inputTap, inputSwipe, inputKeyEvent } from '../src/adb.js';
 import * as childProcess from 'child_process';
 
 vi.mock('child_process', () => ({
@@ -147,5 +147,58 @@ describe('inputTap', () => {
       ['-s', 'R5CT419BXHJ', 'shell', 'input', 'tap', '50', '100'],
       expect.any(Function),
     );
+  });
+});
+
+describe('inputSwipe', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('runs adb shell input swipe with rounded coords and duration', async () => {
+    setupExecFile('');
+    await inputSwipe(100.4, 200.6, 100.4, 800.2, 300);
+    expect(mockExecFile).toHaveBeenCalledWith(
+      'adb',
+      ['shell', 'input', 'swipe', '100', '201', '100', '800', '300'],
+      expect.any(Function),
+    );
+  });
+
+  it('targets specific device with -s', async () => {
+    setupExecFile('');
+    await inputSwipe(0, 0, 0, 100, 250, 'DEV1');
+    expect(mockExecFile).toHaveBeenCalledWith(
+      'adb',
+      ['-s', 'DEV1', 'shell', 'input', 'swipe', '0', '0', '0', '100', '250'],
+      expect.any(Function),
+    );
+  });
+});
+
+describe('inputKeyEvent', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('normalizes bare key name to KEYCODE_ prefix', async () => {
+    setupExecFile('');
+    await inputKeyEvent('back');
+    expect(mockExecFile).toHaveBeenCalledWith(
+      'adb',
+      ['shell', 'input', 'keyevent', 'KEYCODE_BACK'],
+      expect.any(Function),
+    );
+  });
+
+  it('passes through already-prefixed keycode', async () => {
+    setupExecFile('');
+    await inputKeyEvent('KEYCODE_ENTER', 'DEV1');
+    expect(mockExecFile).toHaveBeenCalledWith(
+      'adb',
+      ['-s', 'DEV1', 'shell', 'input', 'keyevent', 'KEYCODE_ENTER'],
+      expect.any(Function),
+    );
+  });
+
+  it('rejects invalid keycode strings', async () => {
+    await expect(inputKeyEvent('BACK; rm -rf /')).rejects.toThrow('유효하지 않은 keycode');
+    expect(mockExecFile).not.toHaveBeenCalled();
   });
 });

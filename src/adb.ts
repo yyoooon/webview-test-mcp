@@ -67,3 +67,27 @@ export async function inputTap(x: number, y: number, deviceId?: string): Promise
     : ['shell', 'input', 'tap', ix, iy];
   await execFile('adb', args);
 }
+
+export async function inputSwipe(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  durationMs: number,
+  deviceId?: string,
+): Promise<void> {
+  const coords = [x1, y1, x2, y2].map((v) => Math.round(v).toString());
+  const swipeArgs = ['shell', 'input', 'swipe', ...coords, Math.round(durationMs).toString()];
+  const args = deviceId ? ['-s', deviceId, ...swipeArgs] : swipeArgs;
+  await execFile('adb', args);
+}
+
+export async function inputKeyEvent(key: string, deviceId?: string): Promise<void> {
+  const keycode = key.startsWith('KEYCODE_') ? key : `KEYCODE_${key.toUpperCase()}`;
+  if (!/^KEYCODE_[A-Z0-9_]+$/.test(keycode)) {
+    throw new Error(`유효하지 않은 keycode: ${key}`);
+  }
+  const keyArgs = ['shell', 'input', 'keyevent', keycode];
+  const args = deviceId ? ['-s', deviceId, ...keyArgs] : keyArgs;
+  await execFile('adb', args);
+}
