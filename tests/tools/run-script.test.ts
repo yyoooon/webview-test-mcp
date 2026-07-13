@@ -53,14 +53,11 @@ describe('webview_run_script handler', () => {
       expect.stringContaining(path.join('.webview-scripts', 'skip-to-home.webview.js')),
       'utf8',
     );
-    expect(send).toHaveBeenCalledWith(
-      'Runtime.evaluate',
-      expect.objectContaining({
-        expression: '(async()=>42)()',
-        awaitPromise: true,
-        returnByValue: true,
-      }),
-    );
+    const sendCall = send.mock.calls[0];
+    expect(sendCall[0]).toBe('Runtime.evaluate');
+    expect((sendCall[1] as any).expression).toBe('globalThis.__args = {};\n(async()=>42)()');
+    expect((sendCall[1] as any).awaitPromise).toBe(true);
+    expect((sendCall[1] as any).returnByValue).toBe(true);
     expect(result.isError).toBeUndefined();
     expect((result.content[0] as { text: string }).text).toContain('42');
   });
@@ -101,5 +98,27 @@ describe('webview_run_script handler', () => {
 
     const result = await handler({ name: 'obj' });
     expect((result.content[0] as { text: string }).text).toContain('"ok": true');
+  });
+
+  it('injects args as globalThis.__args before the script source', async () => {
+    vi.mocked(readFile).mockResolvedValue('(async()=>__args.userId)()');
+    const send = vi.fn().mockResolvedValue({ result: { type: 'string', value: 'yoon' } });
+    stateModule.state.cdp = { connected: true, send } as any;
+
+    await handler({ name: 'with-args', args: { userId: 'yoon', retry: 2 } });
+
+    const expr = send.mock.calls[0][1].expression as string;
+    expect(expr.startsWith('globalThis.__args = {"userId":"yoon","retry":2};\n')).toBe(true);
+  });
+
+  it('injects empty object when args omitted', async () => {
+    vi.mocked(readFile).mockResolvedValue('(async()=>__args)()');
+    const send = vi.fn().mockResolvedValue({ result: { type: 'object', value: {} } });
+    stateModule.state.cdp = { connected: true, send } as any;
+
+    await handler({ name: 'no-args' });
+
+    const expr = send.mock.calls[0][1].expression as string;
+    expect(expr.startsWith('globalThis.__args = {};\n')).toBe(true);
   });
 });

@@ -5,7 +5,7 @@ import { ensureConnected } from '../state.js';
 export const definition = {
   name: 'webview_run_script',
   description:
-    '저장된 매크로 스크립트(.webview-scripts/{name}.webview.js)를 WebView에서 실행합니다. 긴 스크립트를 매번 토큰으로 보낼 필요 없이 이름만으로 실행합니다.',
+    '저장된 매크로 스크립트(.webview-scripts/{name}.webview.js)를 WebView에서 실행합니다. 긴 스크립트를 매번 토큰으로 보낼 필요 없이 이름만으로 실행합니다. args로 파라미터를 넘기면 스크립트에서 __args로 참조할 수 있습니다.',
   inputSchema: {
     type: 'object' as const,
     properties: {
@@ -13,6 +13,11 @@ export const definition = {
         type: 'string',
         description:
           '스크립트 이름 (확장자 제외). 예: "skip-to-home" → .webview-scripts/skip-to-home.webview.js',
+      },
+      args: {
+        type: 'object',
+        description:
+          '스크립트에 주입할 파라미터 객체. 스크립트 안에서 __args로 참조. 예: { "userId": "a@b.c" } → __args.userId',
       },
     },
     required: ['name'],
@@ -37,7 +42,7 @@ interface EvalResult {
   exceptionDetails?: { exception?: { description?: string } };
 }
 
-export async function handler(args: { name: string }) {
+export async function handler(args: { name: string; args?: Record<string, unknown> }) {
   try {
     if (!args?.name) {
       return {
@@ -74,8 +79,9 @@ export async function handler(args: { name: string }) {
     }
 
     const cdp = await ensureConnected();
+    const expression = `globalThis.__args = ${JSON.stringify(args.args ?? {})};\n${source}`;
     const result = (await cdp.send('Runtime.evaluate', {
-      expression: source,
+      expression,
       awaitPromise: true,
       returnByValue: true,
     })) as EvalResult;
