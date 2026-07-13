@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handler } from '../../src/tools/screenshot.js';
 import * as stateModule from '../../src/state.js';
+import * as adbModule from '../../src/adb.js';
+
+vi.mock('../../src/adb.js');
 
 describe('webview_screenshot handler', () => {
   beforeEach(() => {
@@ -15,7 +18,7 @@ describe('webview_screenshot handler', () => {
     };
     stateModule.state.cdp = fakeCdp as any;
 
-    const result = await handler();
+    const result = await handler({ format: 'png' });
     expect(result.content[0]).toEqual({
       type: 'image',
       data: 'iVBORw0KGgo=',
@@ -25,6 +28,7 @@ describe('webview_screenshot handler', () => {
   });
 
   it('returns error when not connected', async () => {
+    vi.mocked(adbModule).getConnectedDevices.mockResolvedValue([]);
     const result = await handler();
     expect(result.isError).toBe(true);
   });

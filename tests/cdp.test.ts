@@ -30,9 +30,9 @@ describe('CdpClient', () => {
     client = new CdpClient();
     mockFetch.mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({
-        webSocketDebuggerUrl: 'ws://localhost:9222/devtools/browser/abc',
-      }),
+      json: () => Promise.resolve([
+        { type: 'page', webSocketDebuggerUrl: 'ws://localhost:9222/devtools/page/abc' },
+      ]),
     });
   });
 

@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handler, DOM_SCRIPT } from '../../src/tools/dom.js';
 import * as stateModule from '../../src/state.js';
+import * as adbModule from '../../src/adb.js';
+
+vi.mock('../../src/adb.js');
 
 describe('webview_get_dom handler', () => {
   beforeEach(() => {
@@ -45,6 +48,7 @@ describe('webview_get_dom handler', () => {
   });
 
   it('returns error when not connected', async () => {
+    vi.mocked(adbModule).getConnectedDevices.mockResolvedValue([]);
     const result = await handler();
     expect(result.isError).toBe(true);
   });
