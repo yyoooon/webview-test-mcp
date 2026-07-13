@@ -1,4 +1,4 @@
-import { getConnectedDevices, findWebViewSockets } from "./adb.js";
+import { getConnectedDevices, findWebViewSockets, getProcessName } from "./adb.js";
 import { ErrorCode, FlowError } from "./errors.js";
 
 interface Device {
@@ -29,10 +29,25 @@ export async function pickDevice(): Promise<Device> {
 export async function pickSocket(
   deviceId: string,
   index?: number,
+  app?: string,
 ): Promise<Socket> {
   const sockets = (await findWebViewSockets(deviceId)) as Socket[];
   if (sockets.length === 0) {
     throw new FlowError(ErrorCode.NO_WEBVIEW);
+  }
+  if (app !== undefined) {
+    const names = await Promise.all(sockets.map((s) => getProcessName(s.pid, deviceId)));
+    const matchedIdx = names.findIndex((n) => n?.includes(app));
+    if (matchedIdx === -1) {
+      throw new FlowError(
+        ErrorCode.NO_WEBVIEW,
+        `앱 "${app}"에 해당하는 WebView가 없습니다.`,
+        {
+          sockets: sockets.map((s, i) => ({ index: i, pid: s.pid, app: names[i] })),
+        },
+      );
+    }
+    return sockets[matchedIdx];
   }
   if (sockets.length === 1) return sockets[0];
   if (index !== undefined) {

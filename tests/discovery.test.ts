@@ -5,6 +5,7 @@ vi.mock("../src/adb.js", () => ({
   findWebViewSockets: vi.fn(),
   forwardPort: vi.fn(),
   removeForward: vi.fn(),
+  getProcessName: vi.fn(),
 }));
 
 import * as adb from "../src/adb.js";
@@ -93,5 +94,32 @@ describe("pickSocket", () => {
     ]);
     const out = await pickSocket("XYZ", 1);
     expect(out.pid).toBe(2);
+  });
+});
+
+describe("pickSocket — app filter", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("picks the socket whose process name contains app", async () => {
+    vi.mocked(adb.findWebViewSockets).mockResolvedValue([
+      { pid: "111", socketName: "webview_devtools_remote_111" },
+      { pid: "222", socketName: "webview_devtools_remote_222" },
+    ]);
+    vi.mocked(adb.getProcessName).mockImplementation(async (pid) =>
+      pid === "111" ? "com.other.app" : "com.huray.healthapp",
+    );
+    const socket = await pickSocket("DEV1", undefined, "huray");
+    expect(socket.pid).toBe("222");
+  });
+
+  it("throws NO_WEBVIEW with candidates when no app matches", async () => {
+    vi.mocked(adb.findWebViewSockets).mockResolvedValue([
+      { pid: "111", socketName: "webview_devtools_remote_111" },
+    ]);
+    vi.mocked(adb.getProcessName).mockResolvedValue("com.other.app");
+    await expect(pickSocket("DEV1", undefined, "huray")).rejects.toMatchObject({
+      code: ErrorCode.NO_WEBVIEW,
+      extras: { sockets: [{ index: 0, pid: "111", app: "com.other.app" }] },
+    });
   });
 });

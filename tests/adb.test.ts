@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getConnectedDevices, findWebViewSockets, forwardPort, removeForward, inputTap, inputSwipe, inputKeyEvent } from '../src/adb.js';
+import { getConnectedDevices, findWebViewSockets, forwardPort, removeForward, inputTap, inputSwipe, inputKeyEvent, getProcessName } from '../src/adb.js';
 import * as childProcess from 'child_process';
 
 vi.mock('child_process', () => ({
@@ -200,5 +200,25 @@ describe('inputKeyEvent', () => {
   it('rejects invalid keycode strings', async () => {
     await expect(inputKeyEvent('BACK; rm -rf /')).rejects.toThrow('유효하지 않은 keycode');
     expect(mockExecFile).not.toHaveBeenCalled();
+  });
+});
+
+describe('getProcessName', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('reads package name from /proc/<pid>/cmdline', async () => {
+    setupExecFile('com.huray.healthapp\0');
+    const name = await getProcessName('12345');
+    expect(name).toBe('com.huray.healthapp');
+    expect(mockExecFile).toHaveBeenCalledWith(
+      'adb',
+      ['shell', 'cat', '/proc/12345/cmdline'],
+      expect.any(Function),
+    );
+  });
+
+  it('returns null when cmdline read fails', async () => {
+    setupExecFileError('No such file');
+    expect(await getProcessName('99999')).toBeNull();
   });
 });

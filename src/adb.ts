@@ -91,3 +91,15 @@ export async function inputKeyEvent(key: string, deviceId?: string): Promise<voi
   const args = deviceId ? ['-s', deviceId, ...keyArgs] : keyArgs;
   await execFile('adb', args);
 }
+
+export async function getProcessName(pid: string, deviceId?: string): Promise<string | null> {
+  const catArgs = ['shell', 'cat', `/proc/${pid}/cmdline`];
+  const args = deviceId ? ['-s', deviceId, ...catArgs] : catArgs;
+  try {
+    const stdout = await execFile('adb', args);
+    const name = stdout.split('\0')[0].trim();
+    return name || null;
+  } catch {
+    return null;
+  }
+}

@@ -1,6 +1,6 @@
 import { CdpClient } from "../cdp.js";
 import { state, resetState, attachConsole } from "../state.js";
-import { forwardPort, removeForward } from "../adb.js";
+import { forwardPort, removeForward, getProcessName } from "../adb.js";
 import { pickDevice, pickSocket } from "../discovery.js";
 import { FlowError } from "../errors.js";
 
@@ -15,12 +15,18 @@ export const definition = {
         type: "number",
         description: "WebView가 여러 개일 때 연결할 소켓 인덱스 (0부터 시작)",
       },
+      app: {
+        type: "string",
+        description:
+          '패키지명(부분 일치)으로 WebView 선택. 예: "com.huray" 또는 "huray". socketIndex보다 우선.',
+      },
     },
   },
 };
 
 interface ConnectArgs {
   socketIndex?: number;
+  app?: string;
 }
 
 export async function handler(args: ConnectArgs) {
@@ -31,7 +37,7 @@ export async function handler(args: ConnectArgs) {
     resetState();
 
     const device = await pickDevice();
-    const socket = await pickSocket(device.id, args.socketIndex);
+    const socket = await pickSocket(device.id, args.socketIndex, args.app);
     const port = await forwardPort(socket.socketName, device.id);
     const cdp = new CdpClient();
     await cdp.connect(port);
@@ -39,6 +45,8 @@ export async function handler(args: ConnectArgs) {
     const evalResult = (await cdp.send("Runtime.evaluate", {
       expression: "window.location.href",
     })) as { result: { value: string } };
+
+    const appName = await getProcessName(socket.pid, device.id);
 
     state.cdp = cdp;
     state.deviceId = device.id;
@@ -50,7 +58,7 @@ export async function handler(args: ConnectArgs) {
       content: [
         {
           type: "text" as const,
-          text: `연결 성공\n기기: ${device.id}\nPID: ${socket.pid}\nCDP 포트: ${port}\n현재 URL: ${evalResult.result.value}`,
+          text: `연결 성공\n기기: ${device.id}\nPID: ${socket.pid}${appName ? ` (${appName})` : ""}\nCDP 포트: ${port}\n현재 URL: ${evalResult.result.value}`,
         },
       ],
     };
