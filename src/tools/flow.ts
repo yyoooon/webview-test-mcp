@@ -27,14 +27,14 @@ interface FlowResult extends SegmentResult {
 export const definition = {
   name: 'webview_flow',
   description:
-    '선언형 step 배열을 한 번에 실행합니다. multi-step 시나리오 (클릭 → 대기 → 캡처/검증)를 1콜로 묶어 토큰/지연을 줄입니다. **디자인 적용 검증**에는 inspect step, **OS-level 터치**(키보드 안 뜨는 등)에는 osTap step을 사용. JS를 직접 짤 필요 없는 케이스에 우선 사용하고, 표현이 부족하면 webview_evaluate로 fallback.',
+    '선언형 step 배열을 한 번에 실행합니다. multi-step 시나리오 (클릭 → 대기 → 캡처/검증)를 1콜로 묶어 토큰/지연을 줄입니다. **디자인 적용 검증**에는 inspect step, **OS-level 터치**(키보드 안 뜨는 등)에는 osTap step을 사용. JS를 직접 짤 필요 없는 케이스에 우선 사용하고, 표현이 부족하면 webview_evaluate로 fallback. 스크롤은 scroll(JS)/osSwipe(ADB), OS 키는 osKey, 실제 네비게이션(새로고침/딥링크)은 goto 객체 형태 사용. flow 중 발생한 console error/warning은 결과의 console 필드에 자동 첨부.',
   inputSchema: {
     type: 'object' as const,
     properties: {
       steps: {
         type: 'array',
         description:
-          'FlowStep 배열. 각 요소는 click/type/waitFor/sleep/goto/capture/raw/assert/inspect/osTap 중 하나. inspect 예: `{ inspect: { title: { selector: "h1", style: ["fontSize","fontWeight"], text: true } } }`. osTap 예: `{ osTap: "#search-input" }` 또는 `{ osTap: { selector: "#btn", offsetX: 0, offsetY: -10 } }` — 좌표는 devicePixelRatio로 자동 스케일링되어 ADB shell input tap으로 실행.',
+          'FlowStep 배열. 각 요소는 click/type/waitFor/sleep/goto/capture/raw/assert/inspect/osTap/scroll/osSwipe/osKey 중 하나. inspect 예: `{ inspect: { title: { selector: "h1", style: ["fontSize","fontWeight"], text: true } } }`. osTap 예: `{ osTap: "#search-input" }` 또는 `{ osTap: { selector: "#btn", offsetX: 0, offsetY: -10 } }` — 좌표는 devicePixelRatio로 자동 스케일링되어 ADB shell input tap으로 실행. scroll 예: `{ scroll: { to: \'#footer\' } }` 또는 `{ scroll: { by: { y: 500 }, container: \'#list\' } }`. osSwipe 예: `{ osSwipe: { direction: \'up\' } }` (손가락 방향, ADB input swipe). osKey 예: `{ osKey: \'BACK\' }` (ADB keyevent). 실제 네비게이션 예: `{ goto: { url: \'/deep/link\' } }` 또는 `{ goto: { reload: true } }` — SPA 라우팅은 기존처럼 문자열 `{ goto: \'/path\' }`.',
       },
       bail: {
         type: 'string',
