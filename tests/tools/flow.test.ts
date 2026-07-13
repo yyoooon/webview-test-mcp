@@ -6,7 +6,12 @@ import { ConsoleBuffer } from '../../src/console-log.js';
 
 vi.mock('../../src/adb.js', async (importActual) => {
   const actual = await importActual<typeof import('../../src/adb.js')>();
-  return { ...actual, inputTap: vi.fn().mockResolvedValue(undefined) };
+  return {
+    ...actual,
+    inputTap: vi.fn().mockResolvedValue(undefined),
+    inputSwipe: vi.fn().mockResolvedValue(undefined),
+    inputKeyEvent: vi.fn().mockResolvedValue(undefined),
+  };
 });
 
 function makeFakeCdp(evalReturn: unknown) {
@@ -73,7 +78,7 @@ describe('flowHandler — osTap orchestration', () => {
         { i: 1, kind: 'osTap', ok: true, ms: 2, x: 100, y: 200 },
       ],
       totalMs: 7,
-      osTap: { i: 1, x: 100, y: 200, selector: '#btn' },
+      control: { type: 'osTap', i: 1, x: 100, y: 200, selector: '#btn' },
     };
     const segment2 = {
       marks: [{ i: 2, kind: 'capture', ok: true, ms: 1 }],
@@ -95,14 +100,14 @@ describe('flowHandler — osTap orchestration', () => {
     expect(parsed.marks.map((m: any) => m.kind)).toEqual(['click', 'osTap', 'capture']);
     expect(parsed.captured?.url).toBe('/home');
     // resume signal removed from final result (orchestration consumed it)
-    expect(parsed.osTap).toBeUndefined();
+    expect(parsed.control).toBeUndefined();
   });
 
   it('halts after osTap when subsequent step fails', async () => {
     const segment1 = {
       marks: [{ i: 0, kind: 'osTap', ok: true, ms: 1, x: 10, y: 20 }],
       totalMs: 1,
-      osTap: { i: 0, x: 10, y: 20, selector: '#x' },
+      control: { type: 'osTap', i: 0, x: 10, y: 20, selector: '#x' },
     };
     const segment2 = {
       marks: [{ i: 1, kind: 'click', ok: false, ms: 1, error: 'SELECTOR_NOT_FOUND' }],
@@ -121,6 +126,30 @@ describe('flowHandler — osTap orchestration', () => {
     const parsed = JSON.parse((result.content[0] as { text: string }).text);
     expect(parsed.failedAt).toBe(1);
     expect(parsed.snapshot).toBeDefined();
+  });
+
+  it('executes adb inputSwipe and resumes remaining steps', async () => {
+    const segment1 = {
+      marks: [{ i: 0, kind: 'osSwipe', ok: true, ms: 1 }],
+      totalMs: 1,
+      control: { type: 'osSwipe', i: 0, x1: 540, y1: 1200, x2: 540, y2: 400, durationMs: 300 },
+    };
+    const segment2 = {
+      marks: [{ i: 1, kind: 'capture', ok: true, ms: 1 }],
+      totalMs: 1,
+      captured: { url: '/list' },
+    };
+    stateModule.state.cdp = makeFakeCdpQueue([segment1, segment2]) as any;
+    stateModule.state.deviceId = 'TESTDEV';
+
+    const result = await flowHandler({
+      steps: [{ osSwipe: { direction: 'up' } }, { capture: { url: true } }] as any,
+    });
+
+    expect(adbModule.inputSwipe).toHaveBeenCalledWith(540, 1200, 540, 400, 300, 'TESTDEV');
+    const parsed = JSON.parse((result.content[0] as { text: string }).text);
+    expect(parsed.marks.map((m: any) => m.kind)).toEqual(['osSwipe', 'capture']);
+    expect(parsed.captured?.url).toBe('/list');
   });
 });
 

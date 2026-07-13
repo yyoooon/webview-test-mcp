@@ -2,14 +2,18 @@ import { ensureConnected, state } from '../state.js';
 import { compileFlow, FlowInput, FlowStep } from '../flow-compiler.js';
 import { applyPayloadGuard } from '../payload-guard.js';
 import { FlowError } from '../errors.js';
-import { inputTap } from '../adb.js';
+import { inputTap, inputSwipe, inputKeyEvent } from '../adb.js';
 import { ConsoleEntry } from '../console-log.js';
+
+type ControlSignal =
+  | { type: 'osTap'; i: number; x: number; y: number; selector: unknown }
+  | { type: 'osSwipe'; i: number; x1: number; y1: number; x2: number; y2: number; durationMs: number };
 
 interface SegmentResult {
   marks: unknown[];
   totalMs: number;
   captured?: Record<string, unknown>;
-  osTap?: { i: number; x: number; y: number; selector: unknown };
+  control?: ControlSignal;
   failedAt?: number;
   snapshot?: unknown;
 }
@@ -89,11 +93,16 @@ export async function flowHandler(args: Partial<FlowInput>) {
       totalMs += segment.totalMs;
       if (segment.captured) captured = { ...(captured ?? {}), ...segment.captured };
 
-      if (segment.osTap) {
-        await inputTap(segment.osTap.x, segment.osTap.y, state.deviceId ?? undefined);
-        const consumedCount = segment.osTap.i - startIndex + 1;
+      if (segment.control) {
+        const c = segment.control;
+        if (c.type === 'osTap') {
+          await inputTap(c.x, c.y, state.deviceId ?? undefined);
+        } else if (c.type === 'osSwipe') {
+          await inputSwipe(c.x1, c.y1, c.x2, c.y2, c.durationMs, state.deviceId ?? undefined);
+        }
+        const consumedCount = c.i - startIndex + 1;
         remainingSteps = remainingSteps.slice(consumedCount);
-        startIndex = segment.osTap.i + 1;
+        startIndex = c.i + 1;
         continue;
       }
 

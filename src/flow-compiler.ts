@@ -73,6 +73,15 @@ export interface ScrollStep {
     | { by: { x?: number; y?: number }; container?: string };
 }
 
+export interface OsSwipeStep {
+  osSwipe: {
+    direction: "up" | "down" | "left" | "right"; // 손가락 이동 방향 (up = 콘텐츠 아래로 스크롤)
+    distance?: number;   // CSS px. 기본: 해당 축 viewport의 40%
+    durationMs?: number; // 기본 300
+    from?: Selector;     // 시작점 요소. 기본: viewport 중앙
+  };
+}
+
 export type FlowStep =
   | ClickStep
   | TypeStep
@@ -84,7 +93,8 @@ export type FlowStep =
   | AssertStep
   | InspectStep
   | OsTapStep
-  | ScrollStep;
+  | ScrollStep
+  | OsSwipeStep;
 
 export type WaitCond =
   | { selector: string }
@@ -190,6 +200,9 @@ function compileStep(step: FlowStep, index: number): string {
   if ("scroll" in step) {
     return compileScroll(step.scroll, index);
   }
+  if ("osSwipe" in step) {
+    return compileOsSwipe(step.osSwipe, index);
+  }
   return `marks.push({ i: ${index}, kind: 'unknown', ok: false, error: 'INVALID_STEP' }); return { failed: ${index} };`;
 }
 
@@ -211,7 +224,38 @@ function compileOsTap(spec: OsTapStep["osTap"], index: number): string {
     const __cx = Math.round((__r.x + __r.width / 2 + ${offsetX}) * __dpr);
     const __cy = Math.round((__r.y + __r.height / 2 + ${offsetY}) * __dpr);
     marks.push({ i: ${index}, kind: 'osTap', ok: true, ms: Math.round(performance.now() - __t), x: __cx, y: __cy });
-    return { osTap: { i: ${index}, x: __cx, y: __cy, selector: ${JSON.stringify(selector)} } };
+    return { control: { type: 'osTap', i: ${index}, x: __cx, y: __cy, selector: ${JSON.stringify(selector)} } };
+  `;
+}
+
+function compileOsSwipe(spec: OsSwipeStep["osSwipe"], index: number): string {
+  const durationMs = spec.durationMs ?? 300;
+  const fromSnippet = spec.from ? selectorSnippet(spec.from) : "null";
+  const distExpr =
+    spec.distance !== undefined
+      ? String(spec.distance)
+      : `(__axis === 'left' || __axis === 'right' ? __vw : __vh) * 0.4`;
+  return `
+    const __t = performance.now();
+    const __from = ${fromSnippet};
+    ${
+      spec.from
+        ? `if (!__from) { marks.push({ i: ${index}, kind: 'osSwipe', ok: false, ms: Math.round(performance.now() - __t), error: 'SELECTOR_NOT_FOUND' }); return { failed: ${index} }; }`
+        : ""
+    }
+    const __vw = window.innerWidth, __vh = window.innerHeight;
+    let __sx = __vw / 2, __sy = __vh / 2;
+    if (__from) { const __r = __from.getBoundingClientRect(); __sx = __r.x + __r.width / 2; __sy = __r.y + __r.height / 2; }
+    const __axis = ${JSON.stringify(spec.direction)};
+    const __dist = ${distExpr};
+    let __ex = __sx, __ey = __sy;
+    if (__axis === 'up') __ey = __sy - __dist;
+    else if (__axis === 'down') __ey = __sy + __dist;
+    else if (__axis === 'left') __ex = __sx - __dist;
+    else __ex = __sx + __dist;
+    const __dpr = window.devicePixelRatio || 1;
+    marks.push({ i: ${index}, kind: 'osSwipe', ok: true, ms: Math.round(performance.now() - __t) });
+    return { control: { type: 'osSwipe', i: ${index}, x1: Math.round(__sx * __dpr), y1: Math.round(__sy * __dpr), x2: Math.round(__ex * __dpr), y2: Math.round(__ey * __dpr), durationMs: ${durationMs} } };
   `;
 }
 
@@ -445,7 +489,7 @@ const SNAPSHOT_JS = `(() => {
 })()`;
 
 export interface CompileFlowOptions {
-  /** 0이 아니면 stepsCode의 step 인덱스를 startIndex 만큼 오프셋해서 컴파일. flowHandler가 osTap 후 잔여 step을 재컴파일할 때 사용. */
+  /** 0이 아니면 stepsCode의 step 인덱스를 startIndex 만큼 오프셋해서 컴파일. flowHandler가 control step(osTap/osSwipe 등) 후 잔여 step을 재컴파일할 때 사용. */
   startIndex?: number;
 }
 
@@ -457,9 +501,9 @@ export function compileFlow(input: FlowInput, options: CompileFlowOptions = {}):
       (step, i) =>
         `await (async () => { ${compileStep(step, i + startIndex)} })().then((r) => {
           if (r && r.failed !== undefined) failed = r.failed;
-          if (r && r.osTap !== undefined) osTap = r.osTap;
+          if (r && r.control !== undefined) control = r.control;
         });
-        if (osTap !== null) return;
+        if (control !== null) return;
 ${bail === "on-error" ? `if (failed !== null) return;` : ""}`,
     )
     .join("\n");
@@ -469,13 +513,13 @@ ${bail === "on-error" ? `if (failed !== null) return;` : ""}`,
     const marks = [];
     let captured = null;
     let failed = null;
-    let osTap = null;
+    let control = null;
     await (async () => {
       ${stepsCode}
     })();
     const result = { marks, totalMs: Math.round(performance.now() - __t0) };
     if (captured !== null) result.captured = captured;
-    if (osTap !== null) result.osTap = osTap;
+    if (control !== null) result.control = control;
     if (failed !== null) {
       result.failedAt = failed;
       result.snapshot = ${SNAPSHOT_JS};

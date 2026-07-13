@@ -226,14 +226,13 @@ describe("compileFlow — osTap step", () => {
       { osTap: "#b" },
     ])) as {
       marks: { kind: string; ok: boolean }[];
-      osTap?: { i: number; x: number; y: number; selector: unknown };
+      control?: { i: number; x: number; y: number; selector: unknown };
     };
     expect(result.marks[1]).toMatchObject({ kind: "osTap", ok: true });
-    expect(result.osTap).toBeDefined();
-    expect(result.osTap!.i).toBe(1);
+    expect(result.control).toMatchObject({ type: "osTap", i: 1 });
     // center = (100 + 25, 200 + 15) = (125, 215); * dpr 2 = (250, 430)
-    expect(result.osTap!.x).toBe(250);
-    expect(result.osTap!.y).toBe(430);
+    expect(result.control!.x).toBe(250);
+    expect(result.control!.y).toBe(430);
   });
 
   it("applies optional offset before scaling", async () => {
@@ -246,10 +245,10 @@ describe("compileFlow — osTap step", () => {
         `,
       },
       { osTap: { selector: "#b", offsetX: 10, offsetY: -5 } },
-    ])) as { osTap?: { x: number; y: number } };
+    ])) as { control?: { x: number; y: number } };
     // center = (50, 25); +offset = (60, 20); *dpr 1 = (60, 20)
-    expect(result.osTap!.x).toBe(60);
-    expect(result.osTap!.y).toBe(20);
+    expect(result.control!.x).toBe(60);
+    expect(result.control!.y).toBe(20);
   });
 
   it("fails with SELECTOR_NOT_FOUND when target missing", async () => {
@@ -258,12 +257,12 @@ describe("compileFlow — osTap step", () => {
     ])) as {
       marks: { ok: boolean; error?: string }[];
       failedAt?: number;
-      osTap?: unknown;
+      control?: unknown;
     };
     expect(result.marks[0].ok).toBe(false);
     expect(result.marks[0].error).toBe("SELECTOR_NOT_FOUND");
     expect(result.failedAt).toBe(0);
-    expect(result.osTap).toBeUndefined();
+    expect(result.control).toBeUndefined();
   });
 
   it("halts flow at osTap (subsequent steps not compiled into same eval)", async () => {
@@ -280,6 +279,41 @@ describe("compileFlow — osTap step", () => {
     // raw + osTap should run; sleep must NOT run (flow halted at osTap so handler can do ADB tap before resuming)
     const kinds = result.marks.map((m) => m.kind);
     expect(kinds).toEqual(["raw", "osTap"]);
+  });
+});
+
+describe("compileFlow — osSwipe", () => {
+  it("returns control signal with dpr-scaled coords for direction up", async () => {
+    const result = (await evalFlow("<div></div>", [
+      { osSwipe: { direction: "up", distance: 200, durationMs: 250 } },
+    ])) as {
+      marks: { kind: string; ok: boolean }[];
+      control?: { type: string; x1: number; y1: number; x2: number; y2: number; durationMs: number };
+    };
+    expect(result.marks[0]).toMatchObject({ kind: "osSwipe", ok: true });
+    expect(result.control?.type).toBe("osSwipe");
+    expect(result.control?.durationMs).toBe(250);
+    // up = 손가락이 위로 → y2 < y1, x 동일
+    expect(result.control!.y2).toBeLessThan(result.control!.y1);
+    expect(result.control!.x2).toBe(result.control!.x1);
+    expect(result.control!.y1 - result.control!.y2).toBe(200); // dpr=1 가정 (happy-dom)
+  });
+
+  it("fails with SELECTOR_NOT_FOUND when from selector missing", async () => {
+    const result = (await evalFlow("<div></div>", [
+      { osSwipe: { direction: "down", from: "#missing" } },
+    ])) as { marks: { error?: string }[]; failedAt?: number };
+    expect(result.marks[0].error).toBe("SELECTOR_NOT_FOUND");
+    expect(result.failedAt).toBe(0);
+  });
+
+  it("steps after osSwipe are not executed in the same segment", async () => {
+    const result = (await evalFlow('<button id="x">Hi</button>', [
+      { osSwipe: { direction: "up" } },
+      { click: "#x" },
+    ])) as { marks: unknown[]; control?: unknown };
+    expect(result.marks).toHaveLength(1);
+    expect(result.control).toBeDefined();
   });
 });
 
