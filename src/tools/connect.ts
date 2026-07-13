@@ -1,5 +1,5 @@
 import { CdpClient } from "../cdp.js";
-import { state, resetState } from "../state.js";
+import { state, resetState, attachConsole } from "../state.js";
 import { forwardPort, removeForward } from "../adb.js";
 import { pickDevice, pickSocket } from "../discovery.js";
 import { FlowError } from "../errors.js";
@@ -44,6 +44,7 @@ export async function handler(args: ConnectArgs) {
     state.deviceId = device.id;
     state.forwardedPort = port;
     state.socketName = socket.socketName;
+    await attachConsole(cdp);
 
     return {
       content: [
