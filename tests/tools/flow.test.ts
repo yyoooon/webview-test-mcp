@@ -174,6 +174,44 @@ describe('flowHandler — osKey orchestration', () => {
   });
 });
 
+describe('flowHandler — nav orchestration', () => {
+  beforeEach(() => { vi.clearAllMocks(); stateModule.resetState(); });
+
+  it('nav control triggers Page.navigate then polls readyState and resumes', async () => {
+    const segment1 = {
+      marks: [{ i: 0, kind: 'goto', ok: true, ms: 0, nav: 'http://x.test/a' }],
+      totalMs: 0,
+      control: { type: 'nav', i: 0, url: 'http://x.test/a', reload: false, timeoutMs: 5000 },
+    };
+    const segment2 = { marks: [{ i: 1, kind: 'sleep', ok: true, ms: 1 }], totalMs: 1 };
+    // Runtime.evaluate 순서: segment1 → readyState 폴링('complete') → segment2
+    const cdp = makeFakeCdpQueue([segment1, 'complete', segment2]);
+    stateModule.state.cdp = cdp as any;
+
+    const result = await flowHandler({
+      steps: [{ goto: { url: 'http://x.test/a' } }, { sleep: 1 }] as any,
+    });
+
+    expect(cdp.send).toHaveBeenCalledWith('Page.navigate', { url: 'http://x.test/a' });
+    const parsed = JSON.parse((result.content[0] as { text: string }).text);
+    expect(parsed.marks.map((m: any) => m.kind)).toEqual(['goto', 'sleep']);
+  }, 10_000);
+
+  it('nav control with reload triggers Page.reload', async () => {
+    const segment1 = {
+      marks: [{ i: 0, kind: 'goto', ok: true, ms: 0 }],
+      totalMs: 0,
+      control: { type: 'nav', i: 0, url: 'http://x.test/', reload: true, timeoutMs: 5000 },
+    };
+    const cdp = makeFakeCdpQueue([segment1, 'complete']);
+    stateModule.state.cdp = cdp as any;
+
+    await flowHandler({ steps: [{ goto: { reload: true } }] as any });
+
+    expect(cdp.send).toHaveBeenCalledWith('Page.reload', {});
+  }, 10_000);
+});
+
 describe('flowHandler — console attachment', () => {
   beforeEach(() => { vi.clearAllMocks(); stateModule.resetState(); });
 

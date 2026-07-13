@@ -25,7 +25,8 @@ export interface SleepStep {
   sleep: number;
 }
 export interface GotoStep {
-  goto: string;
+  /** 문자열: SPA 클라이언트 라우팅 (pushState). 객체: 실제 네비게이션 (CDP Page.navigate / Page.reload). */
+  goto: string | { url?: string; reload?: boolean; timeout?: number };
 }
 export interface CaptureStep {
   capture: CaptureSpec;
@@ -169,12 +170,15 @@ function compileStep(step: FlowStep, index: number): string {
     return compileWaitFor(step.waitFor, timeoutMs, index);
   }
   if ("goto" in step) {
-    return `
+    if (typeof step.goto === "string") {
+      return `
       const __t = performance.now();
       history.pushState({}, '', ${escJson(step.goto)});
       window.dispatchEvent(new PopStateEvent('popstate'));
       marks.push({ i: ${index}, kind: 'goto', ok: true, ms: Math.round(performance.now() - __t) });
     `;
+    }
+    return compileNav(step.goto, index);
   }
   if ("type" in step) {
     const sel = selectorSnippet(step.type.selector);
@@ -216,6 +220,25 @@ function compileStep(step: FlowStep, index: number): string {
     `;
   }
   return `marks.push({ i: ${index}, kind: 'unknown', ok: false, error: 'INVALID_STEP' }); return { failed: ${index} };`;
+}
+
+function compileNav(
+  spec: { url?: string; reload?: boolean; timeout?: number },
+  index: number,
+): string {
+  const timeoutMs = spec.timeout ?? 10_000;
+  if (!spec.url && !spec.reload) {
+    return `marks.push({ i: ${index}, kind: 'goto', ok: false, error: 'INVALID_STEP', detail: 'goto 객체는 url 또는 reload가 필요합니다' }); return { failed: ${index} };`;
+  }
+  const urlExpr = spec.url
+    ? `new URL(${escJson(spec.url)}, location.href).href`
+    : "location.href";
+  const reload = spec.reload && !spec.url ? "true" : "false";
+  return `
+    const __url = ${urlExpr};
+    marks.push({ i: ${index}, kind: 'goto', ok: true, ms: 0, nav: __url });
+    return { control: { type: 'nav', i: ${index}, url: __url, reload: ${reload}, timeoutMs: ${timeoutMs} } };
+  `;
 }
 
 function compileOsTap(spec: OsTapStep["osTap"], index: number): string {

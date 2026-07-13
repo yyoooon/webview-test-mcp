@@ -1,14 +1,15 @@
 import { ensureConnected, state } from '../state.js';
 import { compileFlow, FlowInput, FlowStep } from '../flow-compiler.js';
 import { applyPayloadGuard } from '../payload-guard.js';
-import { FlowError } from '../errors.js';
+import { FlowError, ErrorCode } from '../errors.js';
 import { inputTap, inputSwipe, inputKeyEvent } from '../adb.js';
 import { ConsoleEntry } from '../console-log.js';
 
 type ControlSignal =
   | { type: 'osTap'; i: number; x: number; y: number; selector: unknown }
   | { type: 'osSwipe'; i: number; x1: number; y1: number; x2: number; y2: number; durationMs: number }
-  | { type: 'osKey'; i: number; key: string };
+  | { type: 'osKey'; i: number; key: string }
+  | { type: 'nav'; i: number; url: string; reload: boolean; timeoutMs: number };
 
 interface SegmentResult {
   marks: unknown[];
@@ -102,6 +103,13 @@ export async function flowHandler(args: Partial<FlowInput>) {
           await inputSwipe(c.x1, c.y1, c.x2, c.y2, c.durationMs, state.deviceId ?? undefined);
         } else if (c.type === 'osKey') {
           await inputKeyEvent(c.key, state.deviceId ?? undefined);
+        } else if (c.type === 'nav') {
+          if (c.reload) {
+            await cdp.send('Page.reload', {});
+          } else {
+            await cdp.send('Page.navigate', { url: c.url });
+          }
+          await waitForPageLoad(cdp, c.timeoutMs);
         }
         const consumedCount = c.i - startIndex + 1;
         remainingSteps = remainingSteps.slice(consumedCount);
@@ -145,4 +153,33 @@ export async function flowHandler(args: Partial<FlowInput>) {
       content: [{ type: 'text' as const, text: `flow 실패: ${msg}` }],
     };
   }
+}
+
+interface ReadyStateResult {
+  result: { value: string };
+}
+
+async function waitForPageLoad(
+  cdp: { send: (method: string, params?: Record<string, unknown>) => Promise<unknown> },
+  timeoutMs: number,
+): Promise<void> {
+  const end = Date.now() + timeoutMs;
+  // navigate 직후에는 이전 문서의 readyState가 'complete'로 남아있을 수 있어 잠깐 대기
+  await new Promise((r) => setTimeout(r, 300));
+  while (Date.now() < end) {
+    try {
+      const res = (await cdp.send('Runtime.evaluate', {
+        expression: 'document.readyState',
+        returnByValue: true,
+      })) as ReadyStateResult;
+      if (res.result.value === 'complete') return;
+    } catch {
+      // 네비게이션 중 실행 컨텍스트 파괴 — 재시도
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  throw new FlowError(
+    ErrorCode.WAIT_TIMEOUT,
+    `페이지 로드가 ${timeoutMs}ms 내에 완료되지 않았습니다.`,
+  );
 }

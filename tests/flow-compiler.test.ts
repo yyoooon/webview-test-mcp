@@ -360,3 +360,42 @@ describe("compileFlow — osKey", () => {
     expect(result.control).toMatchObject({ type: "osKey", key: "BACK", i: 0 });
   });
 });
+
+describe("compileFlow — goto object (real navigation)", () => {
+  it("string goto keeps SPA pushState behavior", async () => {
+    const result = (await evalFlow("<div></div>", [{ goto: "/next" }])) as {
+      marks: { kind: string; ok: boolean }[];
+      control?: unknown;
+    };
+    expect(result.marks[0]).toMatchObject({ kind: "goto", ok: true });
+    expect(result.control).toBeUndefined();
+  });
+
+  it("object goto with url returns nav control with absolutized url", async () => {
+    const result = (await evalFlow("<div></div>", [
+      { goto: { url: "/deep/link", timeout: 5000 } },
+    ])) as { control?: { type: string; url: string; reload: boolean; timeoutMs: number } };
+    expect(result.control).toMatchObject({
+      type: "nav",
+      url: "http://localhost:3000/deep/link",
+      reload: false,
+      timeoutMs: 5000,
+    });
+  });
+
+  it("object goto with reload only returns nav control with reload=true", async () => {
+    const result = (await evalFlow("<div></div>", [
+      { goto: { reload: true } },
+    ])) as { control?: { type: string; reload: boolean; url: string } };
+    expect(result.control).toMatchObject({ type: "nav", reload: true });
+  });
+
+  it("object goto without url and reload fails as INVALID_STEP", async () => {
+    const result = (await evalFlow("<div></div>", [{ goto: {} }])) as {
+      marks: { error?: string }[];
+      failedAt?: number;
+    };
+    expect(result.marks[0].error).toBe("INVALID_STEP");
+    expect(result.failedAt).toBe(0);
+  });
+});
