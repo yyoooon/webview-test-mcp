@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { flowHandler } from '../../src/tools/flow.js';
 import * as stateModule from '../../src/state.js';
 import * as adbModule from '../../src/adb.js';
+import { ConsoleBuffer } from '../../src/console-log.js';
 
 vi.mock('../../src/adb.js', async (importActual) => {
   const actual = await importActual<typeof import('../../src/adb.js')>();
@@ -120,5 +121,42 @@ describe('flowHandler — osTap orchestration', () => {
     const parsed = JSON.parse((result.content[0] as { text: string }).text);
     expect(parsed.failedAt).toBe(1);
     expect(parsed.snapshot).toBeDefined();
+  });
+});
+
+describe('flowHandler — console attachment', () => {
+  beforeEach(() => { vi.clearAllMocks(); stateModule.resetState(); });
+
+  it('attaches error/warning logs emitted during the flow', async () => {
+    const buffer = new ConsoleBuffer();
+    buffer.push({ kind: 'console', level: 'error', text: 'before flow' }); // 실행 전 로그 — 제외돼야 함
+    stateModule.state.console = buffer;
+
+    const fakeReturn = { marks: [{ i: 0, kind: 'sleep', ok: true, ms: 1 }], totalMs: 1 };
+    stateModule.state.cdp = {
+      connected: true,
+      send: vi.fn().mockImplementation((method: string) => {
+        if (method === 'Runtime.evaluate') {
+          buffer.push({ kind: 'exception', level: 'error', text: 'TypeError: boom' });
+          buffer.push({ kind: 'console', level: 'log', text: 'verbose noise' }); // log 레벨 — 제외
+          return Promise.resolve({ result: { value: fakeReturn } });
+        }
+        return Promise.resolve({});
+      }),
+    } as any;
+
+    const result = await flowHandler({ steps: [{ sleep: 1 }] });
+    const parsed = JSON.parse((result.content[0] as { text: string }).text);
+    expect(parsed.console).toEqual([{ kind: 'exception', level: 'error', text: 'TypeError: boom' }]);
+  });
+
+  it('omits console field when no errors occurred', async () => {
+    stateModule.state.console = new ConsoleBuffer();
+    const fakeReturn = { marks: [{ i: 0, kind: 'sleep', ok: true, ms: 1 }], totalMs: 1 };
+    stateModule.state.cdp = makeFakeCdp(fakeReturn) as any;
+
+    const result = await flowHandler({ steps: [{ sleep: 1 }] });
+    const parsed = JSON.parse((result.content[0] as { text: string }).text);
+    expect(parsed.console).toBeUndefined();
   });
 });

@@ -3,6 +3,7 @@ import { compileFlow, FlowInput, FlowStep } from '../flow-compiler.js';
 import { applyPayloadGuard } from '../payload-guard.js';
 import { FlowError } from '../errors.js';
 import { inputTap } from '../adb.js';
+import { ConsoleEntry } from '../console-log.js';
 
 interface SegmentResult {
   marks: unknown[];
@@ -11,6 +12,10 @@ interface SegmentResult {
   osTap?: { i: number; x: number; y: number; selector: unknown };
   failedAt?: number;
   snapshot?: unknown;
+}
+
+interface FlowResult extends SegmentResult {
+  console?: ConsoleEntry[];
 }
 
 export const definition = {
@@ -51,6 +56,8 @@ export async function flowHandler(args: Partial<FlowInput>) {
     }
     const cdp = await ensureConnected();
     const bail = args.bail ?? 'on-error';
+    const consoleBuffer = state.console;
+    const consoleCursor = consoleBuffer ? consoleBuffer.cursor : 0;
 
     const allMarks: unknown[] = [];
     let captured: Record<string, unknown> | undefined;
@@ -97,10 +104,16 @@ export async function flowHandler(args: Partial<FlowInput>) {
       break;
     }
 
-    const merged: SegmentResult = { marks: allMarks, totalMs };
+    const merged: FlowResult = { marks: allMarks, totalMs };
     if (captured !== undefined) merged.captured = captured;
     if (failedAt !== undefined) merged.failedAt = failedAt;
     if (snapshot !== undefined) merged.snapshot = snapshot;
+
+    const consoleLogs =
+      consoleBuffer
+        ?.since(consoleCursor)
+        .filter((e) => e.level === 'error' || e.level === 'warning') ?? [];
+    if (consoleLogs.length > 0) merged.console = consoleLogs;
 
     const guarded = applyPayloadGuard(merged, args.outputMaxBytes ?? DEFAULT_MAX_BYTES);
     return {
