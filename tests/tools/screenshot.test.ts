@@ -27,6 +27,25 @@ describe('webview_screenshot handler', () => {
     expect(fakeCdp.send).toHaveBeenCalledWith('Page.captureScreenshot', { format: 'png' });
   });
 
+  it('defaults to jpeg (quality 50) when called without args', async () => {
+    const fakeCdp = {
+      connected: true,
+      send: vi.fn().mockResolvedValue({ data: '/9j/4AAQSkZJRg==' }),
+    };
+    stateModule.state.cdp = fakeCdp as any;
+
+    const result = await handler();
+    expect(result.content[0]).toEqual({
+      type: 'image',
+      data: '/9j/4AAQSkZJRg==',
+      mimeType: 'image/jpeg',
+    });
+    expect(fakeCdp.send).toHaveBeenCalledWith('Page.captureScreenshot', {
+      format: 'jpeg',
+      quality: 50,
+    });
+  });
+
   it('returns error when not connected', async () => {
     vi.mocked(adbModule).getConnectedDevices.mockResolvedValue([]);
     const result = await handler();
