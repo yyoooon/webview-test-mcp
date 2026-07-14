@@ -11,6 +11,14 @@ function stepIsNetWait(step) {
         step.waitFor !== null &&
         'network' in step.waitFor);
 }
+/** object 형태 goto(실제 네비게이션: url/reload)인지. 문자열 goto(pushState)는 제외. */
+function stepIsNav(step) {
+    return (typeof step === 'object' &&
+        step !== null &&
+        'goto' in step &&
+        typeof step.goto === 'object' &&
+        step.goto !== null);
+}
 export const definition = {
     name: 'webview_flow',
     description: '선언형 step 배열을 한 번에 실행합니다. multi-step 시나리오 (클릭 → 대기 → 캡처/검증)를 1콜로 묶어 토큰/지연을 줄입니다. **디자인 적용 검증**에는 inspect step, **OS-level 터치**(키보드 안 뜨는 등)에는 osTap step을 사용. JS를 직접 짤 필요 없는 케이스에 우선 사용하고, 표현이 부족하면 webview_evaluate로 fallback. 스크롤은 scroll(JS)/osSwipe(ADB), OS 키는 osKey, 실제 네비게이션(새로고침/딥링크)은 goto 객체 형태 사용. flow 중 발생한 console error/warning은 결과의 console 필드에 자동 첨부.',
@@ -78,6 +86,19 @@ export async function flowHandler(args) {
             cdp.on('Network.responseReceived', onResp);
             await cdp.send('Network.enable', {});
         }
+        // B: object goto(실제 네비게이션)가 있으면 Page.loadEventFired로 로드 완료를 감지.
+        // 기존엔 nav 후 무조건 300ms 대기 + readyState 폴링 → 이벤트 기반으로 고정 지연 제거.
+        const hasNav = args.steps.some(stepIsNav);
+        let loadCount = 0;
+        let onPageLoad;
+        const pageEvents = hasNav && typeof cdp.on === 'function';
+        if (pageEvents) {
+            onPageLoad = () => {
+                loadCount += 1;
+            };
+            cdp.on('Page.loadEventFired', onPageLoad);
+            await cdp.send('Page.enable', {}).catch(() => { });
+        }
         let remainingSteps = args.steps;
         let startIndex = 0;
         try {
@@ -113,13 +134,14 @@ export async function flowHandler(args) {
                         await inputKeyEvent(c.key, state.deviceId ?? undefined);
                     }
                     else if (c.type === 'nav') {
+                        const loadsBefore = loadCount;
                         if (c.reload) {
                             await cdp.send('Page.reload', {});
                         }
                         else {
                             await cdp.send('Page.navigate', { url: c.url });
                         }
-                        await waitForPageLoad(cdp, c.timeoutMs);
+                        await waitForPageLoad(cdp, c.timeoutMs, pageEvents ? () => loadCount > loadsBefore : undefined);
                     }
                     else if (c.type === 'netwait') {
                         const t0 = Date.now();
@@ -199,6 +221,10 @@ export async function flowHandler(args) {
                     cdp.off('Network.responseReceived', onResp);
                 await cdp.send('Network.disable', {}).catch(() => { });
             }
+            if (pageEvents && onPageLoad) {
+                cdp.off('Page.loadEventFired', onPageLoad);
+                await cdp.send('Page.disable', {}).catch(() => { });
+            }
         }
     }
     catch (error) {
@@ -216,9 +242,18 @@ export async function flowHandler(args) {
         };
     }
 }
-async function waitForPageLoad(cdp, timeoutMs) {
+async function waitForPageLoad(cdp, timeoutMs, loadFired) {
     const end = Date.now() + timeoutMs;
-    // navigate 직후에는 이전 문서의 readyState가 'complete'로 남아있을 수 있어 잠깐 대기
+    if (loadFired) {
+        // 이벤트 기반: 이 네비게이션이 유발한 Page.loadEventFired만 기다림. 고정 지연 없음.
+        while (Date.now() < end) {
+            if (loadFired())
+                return;
+            await new Promise((r) => setTimeout(r, 50));
+        }
+        throw new FlowError(ErrorCode.WAIT_TIMEOUT, `페이지 로드가 ${timeoutMs}ms 내에 완료되지 않았습니다.`);
+    }
+    // 폴백(Page 이벤트 미가용): 이전 문서의 readyState가 'complete'로 남아있을 수 있어 잠깐 대기 후 폴링
     await new Promise((r) => setTimeout(r, 300));
     while (Date.now() < end) {
         try {

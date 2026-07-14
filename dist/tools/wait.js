@@ -14,10 +14,10 @@ export const definition = {
         },
     },
 };
-const POLL_INITIAL = 50;
-const POLL_MAX = 200;
-const POLL_GROWTH = 1.5;
 const DEFAULT_TIMEOUT = 10_000;
+const POLL_INTERVAL = 50;
+/** CDP send는 30s 하드 타임아웃이 있으므로, 한 번의 in-page 대기는 그 아래로 청크. 대부분(≤25s)은 왕복 1회로 끝남. */
+const CHUNK_MS = 25_000;
 /** 대기 조건 → 브라우저에서 평가할 truthy 표현식 + 사람이 읽을 라벨. */
 function buildCheck(args) {
     if (args.selector) {
@@ -57,18 +57,26 @@ export async function handler(args) {
         }
         const cdp = await ensureConnected();
         const timeout = args.timeout ?? DEFAULT_TIMEOUT;
-        const startTime = Date.now();
-        let interval = POLL_INITIAL;
+        const deadline = Date.now() + timeout;
+        // 폴링을 브라우저 안에서 수행 → 대기 1번당 CDP 왕복 1회(청크당). 조건 표현식이 truthy가 될 때까지 in-page에서 대기.
         while (true) {
-            const result = (await cdp.send('Runtime.evaluate', { expression: check.expression, returnByValue: true }));
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) {
+                return { isError: true, content: [{ type: 'text', text: `시간 초과 (${timeout}ms): ${check.goal}` }] };
+            }
+            const budget = Math.min(remaining, CHUNK_MS);
+            const inPage = `(async () => {
+        const __end = performance.now() + ${budget};
+        while (performance.now() < __end) {
+          if (${check.expression}) return true;
+          await new Promise((r) => setTimeout(r, ${POLL_INTERVAL}));
+        }
+        return false;
+      })()`;
+            const result = (await cdp.send('Runtime.evaluate', { expression: inPage, awaitPromise: true, returnByValue: true }));
             if (result.result.value) {
                 return { content: [{ type: 'text', text: `조건 충족 — ${check.label}` }] };
             }
-            if (Date.now() - startTime >= timeout) {
-                return { isError: true, content: [{ type: 'text', text: `시간 초과 (${timeout}ms): ${check.goal}` }] };
-            }
-            await new Promise((resolve) => setTimeout(resolve, interval));
-            interval = Math.min(Math.round(interval * POLL_GROWTH), POLL_MAX);
         }
     }
     catch (error) {

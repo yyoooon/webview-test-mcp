@@ -227,6 +227,43 @@ describe('flowHandler — nav orchestration', () => {
     expect(parsed.marks.map((m: any) => m.kind)).toEqual(['goto', 'sleep']);
   }, 10_000);
 
+  it('resolves nav via Page.loadEventFired (event-driven, no fixed delay) when events available', async () => {
+    const handlers: Record<string, (p: any) => void> = {};
+    const segment1 = {
+      marks: [{ i: 0, kind: 'goto', ok: true, ms: 0, nav: 'http://x.test/a' }],
+      totalMs: 0,
+      control: { type: 'nav', i: 0, url: 'http://x.test/a', reload: false, timeoutMs: 5000 },
+    };
+    const segment2 = { marks: [{ i: 1, kind: 'sleep', ok: true, ms: 1 }], totalMs: 1 };
+    let i = 0;
+    const cdp = {
+      connected: true,
+      on: vi.fn().mockImplementation((m: string, h: (p: any) => void) => { handlers[m] = h; }),
+      off: vi.fn(),
+      send: vi.fn().mockImplementation((method: string) => {
+        if (method === 'Runtime.evaluate') {
+          const v = [segment1, segment2][i++];
+          return Promise.resolve({ result: { value: v } });
+        }
+        if (method === 'Page.navigate') {
+          // 실제 기기처럼 잠시 후 load 이벤트 발생
+          setTimeout(() => handlers['Page.loadEventFired']?.({}), 20);
+        }
+        return Promise.resolve({});
+      }),
+    };
+    stateModule.state.cdp = cdp as any;
+
+    const result = await flowHandler({ steps: [{ goto: { url: 'http://x.test/a' } }, { sleep: 1 }] as any });
+
+    expect(cdp.send).toHaveBeenCalledWith('Page.enable', {});
+    // readyState 폴링(폴백)이 아니라 이벤트로 진행 — Runtime.evaluate는 segment 실행 2회뿐
+    const evalCalls = cdp.send.mock.calls.filter((c) => c[0] === 'Runtime.evaluate');
+    expect(evalCalls).toHaveLength(2);
+    const parsed = JSON.parse((result.content[0] as { text: string }).text);
+    expect(parsed.marks.map((m: any) => m.kind)).toEqual(['goto', 'sleep']);
+  }, 10_000);
+
   it('nav control with reload triggers Page.reload', async () => {
     const segment1 = {
       marks: [{ i: 0, kind: 'goto', ok: true, ms: 0 }],
