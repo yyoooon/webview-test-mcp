@@ -43,4 +43,31 @@ describe('webview_wait_for handler', () => {
     expect(result.isError).toBe(true);
     expect((result.content[0] as { text: string }).text).toContain('시간 초과');
   });
+
+  it('resolves on role condition — checks a visible [role=x] element', async () => {
+    const fakeCdp = { connected: true, send: vi.fn().mockResolvedValue({ result: { value: true } }) };
+    stateModule.state.cdp = fakeCdp as any;
+    const resultPromise = handler({ role: 'dialog' });
+    await vi.advanceTimersByTimeAsync(0);
+    const result = await resultPromise;
+    expect(result.isError).toBeUndefined();
+    // the evaluated expression must target the dialog role
+    const expr = fakeCdp.send.mock.calls[0][1].expression as string;
+    expect(expr).toContain('role=');
+    expect(expr).toContain('dialog');
+    expect((result.content[0] as { text: string }).text).toContain('dialog');
+  });
+
+  it('resolves on gone condition — element absent or invisible', async () => {
+    const fakeCdp = { connected: true, send: vi.fn().mockResolvedValue({ result: { value: true } }) };
+    stateModule.state.cdp = fakeCdp as any;
+    const resultPromise = handler({ gone: '[role=dialog]' });
+    await vi.advanceTimersByTimeAsync(0);
+    const result = await resultPromise;
+    expect(result.isError).toBeUndefined();
+    const expr = fakeCdp.send.mock.calls[0][1].expression as string;
+    // gone means truthy when NOT present/visible
+    expect(expr).toContain('[role=dialog]');
+    expect(expr).toMatch(/!el|! *\(/);
+  });
 });

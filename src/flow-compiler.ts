@@ -108,7 +108,9 @@ export type WaitCond =
   | { text: string; within?: string }
   | { role: string }
   | { gone: string }
-  | { url: string };
+  | { url: string }
+  | { network: string | { method?: string; url: string }; timeout?: number }
+  | { appearsThenGone: string; windowMs?: number };
 
 export interface CaptureSpec {
   url?: boolean;
@@ -175,7 +177,11 @@ function compileStep(step: FlowStep, index: number): string {
       const __t = performance.now();
       history.pushState({}, '', ${escJson(step.goto)});
       window.dispatchEvent(new PopStateEvent('popstate'));
-      marks.push({ i: ${index}, kind: 'goto', ok: true, ms: Math.round(performance.now() - __t) });
+      const __m = { i: ${index}, kind: 'goto', ok: true, ms: Math.round(performance.now() - __t) };
+      // Next.js App Router는 수동 pushState를 라우팅 신호로 안 받아 화면이 안 바뀔 수 있음 → 경고.
+      const __isNext = (typeof window.next !== 'undefined') || !!document.querySelector('#__next, script[src*="/_next/"]');
+      if (__isNext) __m.warn = 'NEXTJS_SOFT_NAV';
+      marks.push(__m);
     `;
     }
     return compileNav(step.goto, index);
@@ -379,11 +385,65 @@ function compileInspect(
   `;
 }
 
+function compileAppearsThenGone(
+  selector: string,
+  windowMs: number,
+  index: number,
+): string {
+  const sel = escJson(selector);
+  return `
+    const __t = performance.now();
+    const __end = __t + ${windowMs};
+    const __isVis = ${VISIBLE_FILTER_JS};
+    let __appeared = false, __wentGone = false, __hits = 0, __wasVis = false;
+    while (performance.now() < __end) {
+      const __el = document.querySelector(${sel});
+      const __v = !!(__el && __isVis(__el));
+      if (__v) { __hits++; __appeared = true; __wasVis = true; }
+      else { if (__wasVis) __wentGone = true; __wasVis = false; }
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    marks.push({ i: ${index}, kind: 'waitFor', ok: true, ms: Math.round(performance.now() - __t), observed: { appeared: __appeared, wentGone: __wentGone, hits: __hits } });
+  `;
+}
+
+/** "POST /path" 또는 { method, url } → 매칭용 method/urlContains 추출. */
+function parseNetworkCond(spec: string | { method?: string; url: string }): {
+  method: string | null;
+  urlContains: string;
+} {
+  if (typeof spec === "string") {
+    const trimmed = spec.trim();
+    const m = trimmed.match(/^([A-Z]+)\s+(.+)$/);
+    if (m) return { method: m[1], urlContains: m[2] };
+    return { method: null, urlContains: trimmed };
+  }
+  return { method: spec.method ?? null, urlContains: spec.url };
+}
+
+function compileNetWait(
+  spec: string | { method?: string; url: string },
+  timeoutMs: number,
+  index: number,
+): string {
+  const { method, urlContains } = parseNetworkCond(spec);
+  // 실제 매칭/대기는 Node 레이어(flowHandler)에서 CDP Network 이벤트로 수행. 여기선 control 신호만 발행.
+  return `
+    return { control: { type: 'netwait', i: ${index}, method: ${JSON.stringify(method)}, urlContains: ${JSON.stringify(urlContains)}, timeoutMs: ${timeoutMs} } };
+  `;
+}
+
 function compileWaitFor(
   cond: WaitCond,
   timeoutMs: number,
   index: number,
 ): string {
+  if ("appearsThenGone" in cond) {
+    return compileAppearsThenGone(cond.appearsThenGone, cond.windowMs ?? 2000, index);
+  }
+  if ("network" in cond) {
+    return compileNetWait(cond.network, cond.timeout ?? 10_000, index);
+  }
   let test: string;
   if ("selector" in cond) {
     test = `(() => { const el = document.querySelector(${escJson(cond.selector)}); return el && (${VISIBLE_FILTER_JS})(el); })()`;

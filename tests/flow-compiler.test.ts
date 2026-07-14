@@ -398,4 +398,62 @@ describe("compileFlow — goto object (real navigation)", () => {
     expect(result.marks[0].error).toBe("INVALID_STEP");
     expect(result.failedAt).toBe(0);
   });
+
+  it("string goto without Next.js has no soft-nav warning", async () => {
+    const result = (await evalFlow("<div></div>", [{ goto: "/next" }])) as {
+      marks: { warn?: string }[];
+    };
+    expect(result.marks[0].warn).toBeUndefined();
+  });
+
+  it("string goto warns NEXTJS_SOFT_NAV when Next.js runtime is present", async () => {
+    const result = (await evalFlow("<div></div>", [
+      { raw: `window.next = { router: {} };` },
+      { goto: "/next" },
+    ])) as { marks: { kind: string; warn?: string }[] };
+    const gotoMark = result.marks.find((m) => m.kind === "goto");
+    expect(gotoMark?.warn).toBe("NEXTJS_SOFT_NAV");
+  });
+});
+
+describe("compileFlow — waitFor appearsThenGone (transient observation)", () => {
+  it("reports appeared + wentGone for an element removed mid-window", async () => {
+    const result = (await evalFlow(
+      `<div id="flash">flash</div>`,
+      [
+        // remove #flash shortly after the window starts
+        { raw: `setTimeout(() => document.getElementById('flash')?.remove(), 60);` },
+        { waitFor: { appearsThenGone: "#flash", windowMs: 400 } },
+      ],
+    )) as {
+      marks: { kind: string; ok: boolean; observed?: { appeared: boolean; wentGone: boolean; hits: number } }[];
+    };
+    const mark = result.marks.find((m) => m.kind === "waitFor")!;
+    expect(mark.ok).toBe(true); // sampler always completes ok
+    expect(mark.observed?.appeared).toBe(true);
+    expect(mark.observed?.wentGone).toBe(true);
+    expect(mark.observed!.hits).toBeGreaterThan(0);
+  });
+
+  it("reports appeared=false when selector never present (no flicker)", async () => {
+    const result = (await evalFlow("<div></div>", [
+      { waitFor: { appearsThenGone: "#never", windowMs: 150 } },
+    ])) as {
+      marks: { kind: string; ok: boolean; observed?: { appeared: boolean; wentGone: boolean; hits: number } }[];
+    };
+    const mark = result.marks.find((m) => m.kind === "waitFor")!;
+    expect(mark.ok).toBe(true);
+    expect(mark.observed?.appeared).toBe(false);
+    expect(mark.observed?.wentGone).toBe(false);
+    expect(mark.observed?.hits).toBe(0);
+  });
+
+  it("does not halt the flow (subsequent steps still run)", async () => {
+    const result = (await evalFlow('<button id="x">x</button>', [
+      { waitFor: { appearsThenGone: "#never", windowMs: 100 } },
+      { click: "#x" },
+    ])) as { marks: { kind: string }[]; failedAt?: number };
+    expect(result.marks.map((m) => m.kind)).toEqual(["waitFor", "click"]);
+    expect(result.failedAt).toBeUndefined();
+  });
 });

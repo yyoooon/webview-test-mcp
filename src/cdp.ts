@@ -12,9 +12,16 @@ export class CdpClient {
   private pending = new Map<number, PendingRequest>();
   private _connected = false;
   private eventHandlers = new Map<string, Set<(params: Record<string, unknown>) => void>>();
+  /** connect 시 선택된 page 타겟의 committed URL (/json 응답 기준). 에러 페이지면 'chrome-error://...'. */
+  private _pageUrl: string | null = null;
 
   get connected(): boolean {
     return this._connected;
+  }
+
+  /** /json 타겟이 보고하는 실제 committed URL. location.href는 에러 페이지에서 의도한 URL을 반환하지만, 이 값은 chrome-error://를 그대로 노출한다. */
+  get pageUrl(): string | null {
+    return this._pageUrl;
   }
 
   on(method: string, handler: (params: Record<string, unknown>) => void): void {
@@ -31,6 +38,7 @@ export class CdpClient {
     if (!res.ok) throw new Error(`CDP targets endpoint returned ${res.status}`);
     const targets = (await res.json()) as Array<{
       type: string;
+      url?: string;
       webSocketDebuggerUrl?: string;
     }>;
     const page = targets.find((t) => t.type === 'page' && t.webSocketDebuggerUrl);
@@ -38,6 +46,7 @@ export class CdpClient {
       throw new Error('No page target found in CDP targets');
     }
     const wsUrl = page.webSocketDebuggerUrl;
+    this._pageUrl = page.url ?? null;
 
     return new Promise<void>((resolve, reject) => {
       this.ws = new WebSocket(wsUrl);

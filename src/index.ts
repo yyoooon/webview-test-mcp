@@ -126,6 +126,15 @@ Android Back 버튼 검증, 검색 Enter 제출 등: \`{ osKey: 'BACK' }\`, \`{ 
 ## 2-6. flow 실패 진단은 console 필드부터
 flow 결과에 \`console\` 필드가 있으면 실행 중 발생한 JS 에러/console.error/warning 목록입니다. 실패 원인의 절반은 DOM이 아니라 JS 에러 — snapshot보다 먼저 확인하세요.
 
+## 2-7. transient(깜빡임) 검증은 appearsThenGone
+순간 떴다 사라지는 UI(유도 팝업 flicker 등)는 최종 상태로 판정 불가 — 중간 노출을 잡아야 합니다. \`{ waitFor: { appearsThenGone: '#popup', windowMs: 2000 } }\`가 windowMs 동안 샘플링해 \`observed: { appeared, wentGone, hits }\`를 기록합니다. flow를 중단하지 않는 관찰용 step. "깜빡이면 안 됨" 회귀 = \`appeared:false\` 기대.
+
+## 2-8. 지연 네트워크는 waitFor network로 완료 대기
+클릭 → 애니메이션(Lottie 등) 콜백 뒤 POST 되는 구조는 클릭 직후 상태조회하면 아직 요청 전이라 오판합니다. \`{ waitFor: { network: 'POST /gourd/throw', timeout: 10000 } }\`로 해당 요청의 response 수신까지 대기한 뒤 상태를 조회하세요. \`method + url 부분일치\`로 매칭, 타임아웃 시 \`observed\`에 그동안 관측된 요청 목록 첨부. netwait step이 있으면 flow 시작 시점부터 요청을 버퍼링하므로 앞선 click이 유발한 요청도 놓치지 않습니다.
+
+## 2-9. goto 문자열 + Next.js = 화면 안 바뀔 수 있음
+\`{ goto: '/path' }\`(pushState)는 Next.js App Router가 라우팅 신호로 안 받아 주소만 바뀌고 화면은 그대로일 수 있습니다. goto 결과 mark에 \`warn: 'NEXTJS_SOFT_NAV'\`가 뜨면 화면 전환이 필요한 경우 \`{ goto: { url } }\`(hard-nav) 또는 실제 버튼 클릭을 쓰세요.
+
 ## 3. webview_screenshot은 "사람 눈으로 확인해야 할 때"만
 - 기능/상태 검증에는 절대 쓰지 마세요 (원칙 1, 2로 대체)
 - 사용할 때는 반드시 selector 옵션으로 element-scoped 캡처

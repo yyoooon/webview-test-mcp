@@ -45,6 +45,10 @@ export async function handler(args: ConnectArgs) {
     const evalResult = (await cdp.send("Runtime.evaluate", {
       expression: "window.location.href",
     })) as { result: { value: string } };
+    const href = evalResult.result.value;
+    // /json 타겟이 보고하는 committed URL이 ground truth. 에러 페이지면 location.href는 의도한 URL을 반환하지만 pageUrl은 chrome-error://를 노출.
+    const committed = cdp.pageUrl ?? href;
+    const isErrorPage = committed.startsWith("chrome-error://");
 
     const appName = await getProcessName(socket.pid, device.id);
 
@@ -54,11 +58,15 @@ export async function handler(args: ConnectArgs) {
     state.socketName = socket.socketName;
     await attachConsole(cdp);
 
+    const warning = isErrorPage
+      ? `\n⚠️ 웹뷰가 에러 페이지 상태입니다 (로드 실패). location.href(의도한 URL): ${href}. 앱을 다시 로드한 뒤 재연결하세요 — 이 상태로는 fetch/세션이 전부 실패합니다.`
+      : "";
+
     return {
       content: [
         {
           type: "text" as const,
-          text: `연결 성공\n기기: ${device.id}\nPID: ${socket.pid}${appName ? ` (${appName})` : ""}\nCDP 포트: ${port}\n현재 URL: ${evalResult.result.value}`,
+          text: `연결 성공\n기기: ${device.id}\nPID: ${socket.pid}${appName ? ` (${appName})` : ""}\nCDP 포트: ${port}\n현재 URL: ${committed}${warning}`,
         },
       ],
     };

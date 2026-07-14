@@ -242,6 +242,88 @@ describe('flowHandler — nav orchestration', () => {
   }, 10_000);
 });
 
+describe('flowHandler — netwait orchestration', () => {
+  beforeEach(() => { vi.clearAllMocks(); stateModule.resetState(); });
+
+  // CDP fake that records event handlers and lets the test emit Network events.
+  function makeNetCdp(segments: unknown[]) {
+    let i = 0;
+    const handlers: Record<string, (p: any) => void> = {};
+    return {
+      connected: true,
+      on: vi.fn().mockImplementation((method: string, h: (p: any) => void) => { handlers[method] = h; }),
+      off: vi.fn(),
+      emit: (method: string, p: any) => handlers[method]?.(p),
+      send: vi.fn().mockImplementation((method: string) => {
+        if (method === 'Runtime.evaluate') {
+          const value = segments[i++] ?? segments[segments.length - 1];
+          return Promise.resolve({ result: { value } });
+        }
+        return Promise.resolve({});
+      }),
+    };
+  }
+
+  it('enables Network and resolves when a matching POST response arrives', async () => {
+    const segment1 = {
+      marks: [{ i: 0, kind: 'click', ok: true, ms: 1 }],
+      totalMs: 1,
+      // netwait control emitted by compiler for step 1
+      control: { type: 'netwait', i: 1, method: 'POST', urlContains: '/gourd/throw', timeoutMs: 3000 },
+    };
+    const segment2 = { marks: [{ i: 2, kind: 'capture', ok: true, ms: 1 }], totalMs: 1, captured: { url: '/home' } };
+    const cdp = makeNetCdp([segment1, segment2]);
+    stateModule.state.cdp = cdp as any;
+
+    const resultPromise = flowHandler({
+      steps: [
+        { click: '#throw' },
+        { waitFor: { network: 'POST /gourd/throw' } },
+        { capture: { url: true } },
+      ] as any,
+    });
+
+    // simulate the request firing shortly after
+    await new Promise((r) => setTimeout(r, 50));
+    cdp.emit('Network.requestWillBeSent', { requestId: 'r1', request: { method: 'POST', url: 'https://api.test/gourd/throw' } });
+    cdp.emit('Network.responseReceived', { requestId: 'r1', response: { url: 'https://api.test/gourd/throw', status: 200 } });
+
+    const result = await resultPromise;
+    expect(cdp.send).toHaveBeenCalledWith('Network.enable', {});
+    const parsed = JSON.parse((result.content[0] as { text: string }).text);
+    const netMark = parsed.marks.find((m: any) => m.matched);
+    expect(netMark).toBeDefined();
+    expect(netMark.matched.status).toBe(200);
+    expect(parsed.marks.map((m: any) => m.kind)).toEqual(['click', 'waitFor', 'capture']);
+    expect(parsed.captured?.url).toBe('/home');
+  }, 10_000);
+
+  it('times out with NETWORK_TIMEOUT when no matching request fires', async () => {
+    const segment1 = {
+      marks: [],
+      totalMs: 0,
+      control: { type: 'netwait', i: 0, method: 'POST', urlContains: '/never', timeoutMs: 300 },
+    };
+    const cdp = makeNetCdp([segment1]);
+    stateModule.state.cdp = cdp as any;
+
+    const result = await flowHandler({
+      steps: [{ waitFor: { network: 'POST /never' } }] as any,
+    });
+    const parsed = JSON.parse((result.content[0] as { text: string }).text);
+    expect(parsed.failedAt).toBe(0);
+    const mark = parsed.marks.find((m: any) => m.error === 'NETWORK_TIMEOUT');
+    expect(mark).toBeDefined();
+  }, 10_000);
+
+  it('does not enable Network when no netwait step present', async () => {
+    const cdp = makeNetCdp([{ marks: [{ i: 0, kind: 'sleep', ok: true, ms: 1 }], totalMs: 1 }]);
+    stateModule.state.cdp = cdp as any;
+    await flowHandler({ steps: [{ sleep: 1 }] });
+    expect(cdp.send).not.toHaveBeenCalledWith('Network.enable', {});
+  });
+});
+
 describe('flowHandler — console attachment', () => {
   beforeEach(() => { vi.clearAllMocks(); stateModule.resetState(); });
 

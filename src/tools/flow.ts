@@ -9,7 +9,25 @@ type ControlSignal =
   | { type: 'osTap'; i: number; x: number; y: number; selector: unknown }
   | { type: 'osSwipe'; i: number; x1: number; y1: number; x2: number; y2: number; durationMs: number }
   | { type: 'osKey'; i: number; key: string }
-  | { type: 'nav'; i: number; url: string; reload: boolean; timeoutMs: number };
+  | { type: 'nav'; i: number; url: string; reload: boolean; timeoutMs: number }
+  | { type: 'netwait'; i: number; method: string | null; urlContains: string; timeoutMs: number };
+
+interface NetEntry {
+  method: string;
+  url: string;
+  status?: number;
+}
+
+function stepIsNetWait(step: FlowStep): boolean {
+  return (
+    typeof step === 'object' &&
+    step !== null &&
+    'waitFor' in step &&
+    typeof (step as { waitFor: unknown }).waitFor === 'object' &&
+    (step as { waitFor: object }).waitFor !== null &&
+    'network' in (step as { waitFor: object }).waitFor
+  );
+}
 
 interface SegmentResult {
   marks: unknown[];
@@ -34,7 +52,7 @@ export const definition = {
       steps: {
         type: 'array',
         description:
-          'FlowStep 배열. 각 요소는 click/type/waitFor/sleep/goto/capture/raw/assert/inspect/osTap/scroll/osSwipe/osKey 중 하나. inspect 예: `{ inspect: { title: { selector: "h1", style: ["fontSize","fontWeight"], text: true } } }`. osTap 예: `{ osTap: "#search-input" }` 또는 `{ osTap: { selector: "#btn", offsetX: 0, offsetY: -10 } }` — 좌표는 devicePixelRatio로 자동 스케일링되어 ADB shell input tap으로 실행. scroll 예: `{ scroll: { to: \'#footer\' } }` 또는 `{ scroll: { by: { y: 500 }, container: \'#list\' } }`. osSwipe 예: `{ osSwipe: { direction: \'up\' } }` (손가락 방향, ADB input swipe). osKey 예: `{ osKey: \'BACK\' }` (ADB keyevent). 실제 네비게이션 예: `{ goto: { url: \'/deep/link\' } }` 또는 `{ goto: { reload: true } }` — SPA 라우팅은 기존처럼 문자열 `{ goto: \'/path\' }`.',
+          'FlowStep 배열. 각 요소는 click/type/waitFor/sleep/goto/capture/raw/assert/inspect/osTap/scroll/osSwipe/osKey 중 하나. inspect 예: `{ inspect: { title: { selector: "h1", style: ["fontSize","fontWeight"], text: true } } }`. osTap 예: `{ osTap: "#search-input" }` 또는 `{ osTap: { selector: "#btn", offsetX: 0, offsetY: -10 } }` — 좌표는 devicePixelRatio로 자동 스케일링되어 ADB shell input tap으로 실행. scroll 예: `{ scroll: { to: \'#footer\' } }` 또는 `{ scroll: { by: { y: 500 }, container: \'#list\' } }`. osSwipe 예: `{ osSwipe: { direction: \'up\' } }` (손가락 방향, ADB input swipe). osKey 예: `{ osKey: \'BACK\' }` (ADB keyevent). 실제 네비게이션 예: `{ goto: { url: \'/deep/link\' } }` 또는 `{ goto: { reload: true } }` — SPA 라우팅은 기존처럼 문자열 `{ goto: \'/path\' }`. waitFor는 selector/text/role/gone/url 외에 **transient 관찰** `{ waitFor: { appearsThenGone: \'#popup\', windowMs: 2000 } }` (windowMs 동안 샘플링해 observed.appeared/wentGone/hits 기록 — 깜빡임 회귀 검증용, flow를 중단하지 않음)와 **네트워크 완료 대기** `{ waitFor: { network: \'POST /gourd/throw\', timeout: 10000 } }` (해당 요청의 response 수신까지 대기 — Lottie 콜백 뒤 POST처럼 지연 요청 후 상태조회 오판 방지) 지원.',
       },
       bail: {
         type: 'string',
@@ -71,9 +89,35 @@ export async function flowHandler(args: Partial<FlowInput>) {
     let failedAt: number | undefined;
     let snapshot: unknown;
 
+    // #5 네트워크 대기: netwait step이 있으면 flow 시작 전에 Network 도메인을 켜고
+    // 이벤트를 버퍼링한다 (앞선 click이 유발한 요청도 놓치지 않도록).
+    const hasNetWait = (args.steps as FlowStep[]).some(stepIsNetWait);
+    const netBuffer: NetEntry[] = [];
+    let netCursor = 0;
+    let onReq: ((p: Record<string, unknown>) => void) | undefined;
+    let onResp: ((p: Record<string, unknown>) => void) | undefined;
+    if (hasNetWait) {
+      const reqMap = new Map<string, { method: string; url: string }>();
+      onReq = (p) => {
+        const id = p.requestId as string | undefined;
+        const req = p.request as { method?: string; url?: string } | undefined;
+        if (id && req?.url) reqMap.set(id, { method: req.method ?? '', url: req.url });
+      };
+      onResp = (p) => {
+        const id = p.requestId as string | undefined;
+        const resp = p.response as { url?: string; status?: number } | undefined;
+        const meta = id ? reqMap.get(id) : undefined;
+        if (meta) netBuffer.push({ method: meta.method, url: resp?.url ?? meta.url, status: resp?.status });
+      };
+      cdp.on('Network.requestWillBeSent', onReq);
+      cdp.on('Network.responseReceived', onResp);
+      await cdp.send('Network.enable', {});
+    }
+
     let remainingSteps: FlowStep[] = args.steps as FlowStep[];
     let startIndex = 0;
 
+    try {
     while (remainingSteps.length > 0) {
       const expr = compileFlow({ steps: remainingSteps, bail }, { startIndex });
       const evalResult = (await cdp.send('Runtime.evaluate', {
@@ -97,6 +141,7 @@ export async function flowHandler(args: Partial<FlowInput>) {
 
       if (segment.control) {
         const c = segment.control;
+        let stop = false;
         if (c.type === 'osTap') {
           await inputTap(c.x, c.y, state.deviceId ?? undefined);
         } else if (c.type === 'osSwipe') {
@@ -110,11 +155,44 @@ export async function flowHandler(args: Partial<FlowInput>) {
             await cdp.send('Page.navigate', { url: c.url });
           }
           await waitForPageLoad(cdp, c.timeoutMs);
+        } else if (c.type === 'netwait') {
+          const t0 = Date.now();
+          const deadline = t0 + c.timeoutMs;
+          let matched: NetEntry | undefined;
+          while (Date.now() < deadline) {
+            for (let k = netCursor; k < netBuffer.length; k++) {
+              const e = netBuffer[k];
+              if ((c.method == null || e.method === c.method) && e.url.includes(c.urlContains)) {
+                matched = e;
+                netCursor = k + 1;
+                break;
+              }
+            }
+            if (matched) break;
+            await new Promise((r) => setTimeout(r, 100));
+          }
+          const ms = Date.now() - t0;
+          if (matched) {
+            allMarks.push({ i: c.i, kind: 'waitFor', ok: true, ms, matched });
+          } else {
+            allMarks.push({
+              i: c.i,
+              kind: 'waitFor',
+              ok: false,
+              ms,
+              error: 'NETWORK_TIMEOUT',
+              cond: { method: c.method, urlContains: c.urlContains },
+              observed: netBuffer.slice(-8),
+            });
+            failedAt = c.i;
+            if (bail === 'on-error') stop = true;
+          }
         }
         if (segment.failedAt !== undefined) {
           failedAt = segment.failedAt;
           snapshot = segment.snapshot;
         }
+        if (stop) break;
 
         const consumedCount = c.i - startIndex + 1;
         remainingSteps = remainingSteps.slice(consumedCount);
@@ -144,6 +222,13 @@ export async function flowHandler(args: Partial<FlowInput>) {
     return {
       content: [{ type: 'text' as const, text: JSON.stringify(guarded, null, 2) }],
     };
+    } finally {
+      if (hasNetWait) {
+        if (onReq) cdp.off('Network.requestWillBeSent', onReq);
+        if (onResp) cdp.off('Network.responseReceived', onResp);
+        await cdp.send('Network.disable', {}).catch(() => {});
+      }
+    }
   } catch (error) {
     if (error instanceof FlowError) {
       const extras = error.extras ? `\n${JSON.stringify(error.extras, null, 2)}` : '';

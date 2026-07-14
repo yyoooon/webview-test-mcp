@@ -5,6 +5,11 @@ import * as discovery from "../../src/discovery.js";
 import * as stateModule from "../../src/state.js";
 import { CdpClient } from "../../src/cdp.js";
 
+const cdpMock = vi.hoisted(() => ({
+  pageUrl: "http://localhost:3000/" as string | null,
+  href: "http://localhost:3000/",
+}));
+
 vi.mock("../../src/adb.js");
 vi.mock("../../src/discovery.js", { spy: true });
 vi.mock("../../src/cdp.js", () => ({
@@ -12,7 +17,8 @@ vi.mock("../../src/cdp.js", () => ({
     connect: vi.fn().mockResolvedValue(undefined),
     send: vi
       .fn()
-      .mockResolvedValue({ result: { value: "http://localhost:3000/" } }),
+      .mockImplementation(() => Promise.resolve({ result: { value: cdpMock.href } })),
+    pageUrl: cdpMock.pageUrl,
     connected: true,
     close: vi.fn(),
   })),
@@ -24,6 +30,8 @@ describe("webview_connect handler", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     stateModule.resetState();
+    cdpMock.pageUrl = "http://localhost:3000/";
+    cdpMock.href = "http://localhost:3000/";
   });
 
   it("connects successfully with single device and single webview", async () => {
@@ -125,6 +133,45 @@ describe("webview_connect handler", () => {
       "webview_devtools_remote_67890",
       "R5CT419BXHJ",
     );
+  });
+
+  it("reports committed page URL from CDP target, not just location.href", async () => {
+    mockAdb.getConnectedDevices.mockResolvedValue([
+      { id: "R5CT419BXHJ", state: "device" },
+    ]);
+    mockAdb.findWebViewSockets.mockResolvedValue([
+      { pid: "12345", socketName: "webview_devtools_remote_12345" },
+    ]);
+    mockAdb.forwardPort.mockResolvedValue(9222);
+    cdpMock.pageUrl = "https://nest.huraydev.net/home";
+    cdpMock.href = "https://nest.huraydev.net/home";
+
+    const result = await handler({});
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("현재 URL: https://nest.huraydev.net/home");
+    expect(text).not.toContain("⚠️");
+  });
+
+  it("warns when webview is on a chrome-error page (committed URL != location.href)", async () => {
+    mockAdb.getConnectedDevices.mockResolvedValue([
+      { id: "R5CT419BXHJ", state: "device" },
+    ]);
+    mockAdb.findWebViewSockets.mockResolvedValue([
+      { pid: "12345", socketName: "webview_devtools_remote_12345" },
+    ]);
+    mockAdb.forwardPort.mockResolvedValue(9222);
+    // committed URL is the error page; location.href still returns the intended URL
+    cdpMock.pageUrl = "chrome-error://chromewebdata/";
+    cdpMock.href = "https://nest.huraydev.net/home";
+
+    const result = await handler({});
+    expect(result.isError).toBeUndefined();
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("현재 URL: chrome-error://chromewebdata/");
+    expect(text).toContain("⚠️");
+    expect(text).toContain("에러 페이지");
+    // surfaces the intended URL so the user knows what failed to load
+    expect(text).toContain("https://nest.huraydev.net/home");
   });
 
   it("shows app name next to PID in success text", async () => {
