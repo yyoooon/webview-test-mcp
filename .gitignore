@@ -1,5 +1,5 @@
 node_modules/
-dist/
+# build output is committed — plugin install clones the repo and does NOT build (needs dist/)
 .omc/
 *.log
 .DS_Store

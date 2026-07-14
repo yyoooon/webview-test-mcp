@@ -1,26 +1,16 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js';
-
+import { CallToolRequestSchema, ListToolsRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
 import { definition as connectDef, handler as connectHandler } from './tools/connect.js';
 import { definition as screenshotDef, handler as screenshotHandler } from './tools/screenshot.js';
 import { definition as domDef, handler as domHandler } from './tools/dom.js';
-import {
-  clickDefinition,
-  typeDefinition,
-  clickHandler,
-  typeHandler,
-} from './tools/interact.js';
+import { clickDefinition, typeDefinition, clickHandler, typeHandler, } from './tools/interact.js';
 import { definition as evaluateDef, handler as evaluateHandler } from './tools/evaluate.js';
 import { definition as waitDef, handler as waitHandler } from './tools/wait.js';
 import { definition as flowDef, flowHandler } from './tools/flow.js';
 import { definition as runScriptDef, handler as runScriptHandler } from './tools/run-script.js';
 import { state } from './state.js';
 import { removeForward } from './adb.js';
-
 const INSTRUCTIONS = `이 서버는 Android WebView 자동화 툴입니다. 불필요한 왕복을 피하기 위해 다음 원칙을 반드시 지키세요.
 
 ## 0. 다중 step 시나리오는 webview_flow 우선
@@ -169,52 +159,45 @@ flow 결과에 \`console\` 필드가 있으면 실행 중 발생한 JS 에러/co
 | \`시간 초과 (Nms): ... 미발견\` (wait_for) | 조건 미충족 | 해당 시점 DOM 또는 \`webview_evaluate\`로 상태 찍어보기. 네트워크 대기면 timeout 상향 제안, 클라이언트 로직이면 React Query 상태 등 확인 |
 
 선행조건 문제(ADB 미연결, 디버그 빌드 미적용)는 자동 해결 시도하지 말고 사용자에게 넘기세요. 매크로 재생 중 실패는 해당 단계까지의 snapshot까지만 리포트하고 멈춥니다.`;
-
-const server = new Server(
-  { name: 'webview-test', version: '1.2.0' },
-  { capabilities: { tools: {} }, instructions: INSTRUCTIONS },
-);
-
+const server = new Server({ name: 'webview-test', version: '1.2.0' }, { capabilities: { tools: {} }, instructions: INSTRUCTIONS });
 const tools = [connectDef, screenshotDef, domDef, clickDefinition, typeDefinition, evaluateDef, waitDef, flowDef, runScriptDef];
-
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
-
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
-
-  switch (name) {
-    case 'webview_connect':
-      return await connectHandler(args as any);
-    case 'webview_screenshot':
-      return await screenshotHandler(args as any);
-    case 'webview_get_dom':
-      return await domHandler();
-    case 'webview_click':
-      return await clickHandler(args as any);
-    case 'webview_type':
-      return await typeHandler(args as any);
-    case 'webview_evaluate':
-      return await evaluateHandler(args as any);
-    case 'webview_wait_for':
-      return await waitHandler(args as any);
-    case 'webview_flow':
-      return await flowHandler(args as any);
-    case 'webview_run_script':
-      return await runScriptHandler(args as any);
-    default:
-      return {
-        isError: true as const,
-        content: [{ type: 'text' as const, text: `알 수 없는 도구: ${name}` }],
-      };
-  }
+    const { name, arguments: args } = request.params;
+    switch (name) {
+        case 'webview_connect':
+            return await connectHandler(args);
+        case 'webview_screenshot':
+            return await screenshotHandler(args);
+        case 'webview_get_dom':
+            return await domHandler();
+        case 'webview_click':
+            return await clickHandler(args);
+        case 'webview_type':
+            return await typeHandler(args);
+        case 'webview_evaluate':
+            return await evaluateHandler(args);
+        case 'webview_wait_for':
+            return await waitHandler(args);
+        case 'webview_flow':
+            return await flowHandler(args);
+        case 'webview_run_script':
+            return await runScriptHandler(args);
+        default:
+            return {
+                isError: true,
+                content: [{ type: 'text', text: `알 수 없는 도구: ${name}` }],
+            };
+    }
 });
-
 // Cleanup on exit
 process.on('SIGINT', async () => {
-  if (state.cdp) state.cdp.close();
-  if (state.forwardedPort) await removeForward(state.forwardedPort).catch(() => {});
-  process.exit(0);
+    if (state.cdp)
+        state.cdp.close();
+    if (state.forwardedPort)
+        await removeForward(state.forwardedPort).catch(() => { });
+    process.exit(0);
 });
-
 const transport = new StdioServerTransport();
 await server.connect(transport);
+//# sourceMappingURL=index.js.map
