@@ -329,6 +329,20 @@ claude plugin marketplace update webview-test-mcp
 # 재설치 후 Claude Code 재시작
 ```
 
+## 검증 스크립트 스크래치 (`.webview-scripts/`)
+
+프로젝트에서 검증용 스크립트를 브랜치 단위로 관리한다 (browser-verifier의 `.browser-verifier/`와 동일 방식). 전부 **로컬·gitignored**.
+
+```
+<repo>/.webview-scripts/
+├── <branch-slug>/   ← 그 브랜치에서 만드는 스크래치 (브랜치 삭제 시 자동 정리)
+└── _shared/         ← 브랜치 무관 공용 헬퍼 (스윕 제외)
+```
+
+- `<branch-slug>` = 현재 브랜치명의 `/` → `-` (예: `fix/foo` → `fix-foo`). main 작업은 `main/`.
+- 플러그인의 **SessionStart 훅**(`hooks/session-start-webview-sweep.sh`)이 세션 시작 때: (1) `.webview-scripts/`가 있으면 `.gitignore`에 자동 등록, (2) git에 없는 브랜치의 `<branch-slug>/` 폴더를 스윕. `_shared/`는 항상 보존.
+- 옵트아웃: `touch ~/.webview-test-no-session-check`.
+
 ## 개발용 로컬 실행
 
 플러그인 배포 없이 소스를 직접 돌릴 때:

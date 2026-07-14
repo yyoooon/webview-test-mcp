@@ -8,7 +8,7 @@
       "name": "webview-test",
       "source": "./",
       "description": "Android WebView automation & verification for Claude Code. CDP-over-ADB, declarative webview_flow (click/type/waitFor/inspect/osTap/scroll/osSwipe/osKey/goto), transient(appearsThenGone) & network-completion waits, single-call evaluate chaining.",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "license": "MIT",
       "keywords": [
         "mcp",

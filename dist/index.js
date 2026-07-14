@@ -159,7 +159,7 @@ flow 결과에 \`console\` 필드가 있으면 실행 중 발생한 JS 에러/co
 | \`시간 초과 (Nms): ... 미발견\` (wait_for) | 조건 미충족 | 해당 시점 DOM 또는 \`webview_evaluate\`로 상태 찍어보기. 네트워크 대기면 timeout 상향 제안, 클라이언트 로직이면 React Query 상태 등 확인 |
 
 선행조건 문제(ADB 미연결, 디버그 빌드 미적용)는 자동 해결 시도하지 말고 사용자에게 넘기세요. 매크로 재생 중 실패는 해당 단계까지의 snapshot까지만 리포트하고 멈춥니다.`;
-const server = new Server({ name: 'webview-test', version: '1.3.0' }, { capabilities: { tools: {} }, instructions: INSTRUCTIONS });
+const server = new Server({ name: 'webview-test', version: '1.4.0' }, { capabilities: { tools: {} }, instructions: INSTRUCTIONS });
 const tools = [connectDef, screenshotDef, domDef, clickDefinition, typeDefinition, evaluateDef, waitDef, flowDef, runScriptDef];
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
