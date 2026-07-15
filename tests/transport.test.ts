@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import WebSocket from 'ws';
-import { wrapForTarget, unwrapFromTarget, RawTransport } from '../src/transport.js';
+import { wrapForTarget, unwrapFromTarget, RawTransport, IosTargetTransport } from '../src/transport.js';
 
 vi.mock('ws', () => {
   const MockWebSocket = vi.fn().mockImplementation(() => {
@@ -91,5 +91,34 @@ describe('RawTransport', () => {
     await p;
     ws._emit('close');
     expect(closed).toHaveBeenCalled();
+  });
+});
+
+describe('IosTargetTransport', () => {
+  it('waits for page targetCreated, then wraps sends and unwraps responses', async () => {
+    const t = new IosTargetTransport('ws://ios/1');
+    const received: any[] = [];
+    t.onMessage((m) => received.push(m));
+    const p = t.connect();
+    const ws = vi.mocked(WebSocket).mock.results.at(-1)!.value;
+    // 페이지 타겟 announce → connect resolve
+    ws._emit('message', JSON.stringify({
+      method: 'Target.targetCreated', params: { targetInfo: { targetId: 'page-9', type: 'page' } },
+    }));
+    await p;
+
+    // send는 Target.sendMessageToTarget으로 래핑
+    t.send({ id: 5, method: 'Runtime.evaluate', params: { expression: '1' } });
+    const sent = JSON.parse(ws.send.mock.calls[0][0]);
+    expect(sent.method).toBe('Target.sendMessageToTarget');
+    expect(sent.params.targetId).toBe('page-9');
+    expect(JSON.parse(sent.params.message)).toMatchObject({ id: 5, method: 'Runtime.evaluate' });
+
+    // 응답은 dispatchMessageFromTarget으로 래핑되어 도착 → 언래핑되어 onMessage로
+    ws._emit('message', JSON.stringify({
+      method: 'Target.dispatchMessageFromTarget',
+      params: { targetId: 'page-9', message: JSON.stringify({ id: 5, result: { value: 1 } }) },
+    }));
+    expect(received).toContainEqual({ id: 5, result: { value: 1 } });
   });
 });

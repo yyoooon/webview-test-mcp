@@ -83,3 +83,51 @@ export class RawTransport implements Transport {
     if (this.ws) { this.ws.close(); this.ws = null; }
   }
 }
+
+export class IosTargetTransport implements Transport {
+  private ws: WebSocket | null = null;
+  private messageCb: (msg: CdpInbound) => void = () => {};
+  private closeCb: () => void = () => {};
+  private pageTargetId: string | null = null;
+  private onPageReady: (() => void) | null = null;
+
+  constructor(private wsUrl: string) {}
+
+  connect(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      this.ws = new WebSocket(this.wsUrl);
+      const timer = setTimeout(
+        () => reject(new Error('iOS page target announce 타임아웃 (맥 웹 인스펙터 창을 닫으세요)')),
+        5000,
+      );
+      this.onPageReady = () => { clearTimeout(timer); resolve(); };
+
+      this.ws.on('message', (data: WebSocket.Data) => {
+        const raw = JSON.parse(data.toString()) as Record<string, unknown>;
+        const u = unwrapFromTarget(raw);
+        if (u.kind === 'targetCreated' && u.type === 'page') {
+          this.pageTargetId = u.targetId;
+          this.onPageReady?.();
+          this.onPageReady = null;
+        } else if (u.kind === 'message') {
+          this.messageCb(u.msg);
+        }
+        // targetDestroyed / other → 무시
+      });
+      this.ws.on('close', () => this.closeCb());
+      this.ws.on('error', (err: Error) => { clearTimeout(timer); reject(err); });
+    });
+  }
+
+  send(msg: CdpOutbound): void {
+    if (!this.pageTargetId) throw new Error('iOS page target 미확보');
+    this.ws!.send(JSON.stringify(wrapForTarget(this.pageTargetId, msg)));
+  }
+
+  onMessage(cb: (msg: CdpInbound) => void): void { this.messageCb = cb; }
+  onClose(cb: () => void): void { this.closeCb = cb; }
+
+  close(): void {
+    if (this.ws) { this.ws.close(); this.ws = null; }
+  }
+}
