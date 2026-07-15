@@ -1,4 +1,4 @@
-import { ensureConnected } from '../state.js';
+import { ensureConnected, state } from '../state.js';
 export const definition = {
     name: 'webview_screenshot',
     description: '⚠️ 최후의 수단. 먼저 webview_evaluate로 getComputedStyle/classList/textContent/getBoundingClientRect를 뽑아 검증하세요 — 10~100배 빠르고 토큰도 거의 안 듭니다. 스크린샷은 오직 (1) 시각 회귀(아이콘 누락, 색 대비, z-index 겹침 등 style로 안 잡히는 것), (2) 레이아웃 전반 QA, (3) 사용자에게 보여줘야 할 때만. 호출 시 반드시 selector로 element-scoped 캡처하세요. 풀스크린(selector 생략)은 레이아웃 전반 QA일 때만 예외적으로 허용.',
@@ -39,6 +39,13 @@ async function getElementRect(cdp, selector) {
         return null;
     return JSON.parse(res.result.value);
 }
+async function getViewportRect(cdp) {
+    const res = (await cdp.send('Runtime.evaluate', {
+        expression: 'JSON.stringify({x:0,y:0,width:window.innerWidth,height:window.innerHeight})',
+        returnByValue: true,
+    }));
+    return JSON.parse(res.result.value);
+}
 export async function handler(args = {}) {
     try {
         const cdp = await ensureConnected();
@@ -68,15 +75,26 @@ export async function handler(args = {}) {
                 scale: 1,
             };
         }
-        const result = (await cdp.send('Page.captureScreenshot', params));
+        let data;
+        let mime;
+        if (state.platform === 'ios') {
+            // iOS: Page.captureScreenshot 미지원 → snapshotRect (dataURL 반환)
+            const rect = params.clip ?? (await getViewportRect(cdp));
+            const res = (await cdp.send('Page.snapshotRect', {
+                x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+                coordinateSystem: 'Viewport',
+            }));
+            const comma = res.dataURL.indexOf(',');
+            data = res.dataURL.slice(comma + 1);
+            mime = res.dataURL.startsWith('data:image/png') ? 'image/png' : 'image/jpeg';
+        }
+        else {
+            const res = (await cdp.send('Page.captureScreenshot', params));
+            data = res.data;
+            mime = format === 'jpeg' ? 'image/jpeg' : 'image/png';
+        }
         return {
-            content: [
-                {
-                    type: 'image',
-                    data: result.data,
-                    mimeType: (format === 'jpeg' ? 'image/jpeg' : 'image/png'),
-                },
-            ],
+            content: [{ type: 'image', data, mimeType: mime }],
         };
     }
     catch (error) {

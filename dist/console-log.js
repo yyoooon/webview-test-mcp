@@ -38,7 +38,12 @@ export class ConsoleBuffer {
             const text = (d?.exception?.description ?? d?.text ?? 'Unknown exception').slice(0, MAX_TEXT_LENGTH);
             this.push({ kind: 'exception', level: 'error', text });
         });
+        cdp.on('Console.messageAdded', (params) => {
+            const p = params;
+            this.push({ kind: 'console', level: p.message?.level ?? 'log', text: (p.message?.text ?? '').slice(0, MAX_TEXT_LENGTH) });
+        });
         await cdp.send('Runtime.enable');
+        await cdp.send('Console.enable').catch(() => { });
     }
 }
 //# sourceMappingURL=console-log.js.map

@@ -104,19 +104,55 @@ export async function flowHandler(args) {
         try {
             while (remainingSteps.length > 0) {
                 const expr = compileFlow({ steps: remainingSteps, bail }, { startIndex });
-                const evalResult = (await cdp.send('Runtime.evaluate', {
-                    expression: expr,
-                    awaitPromise: true,
-                    returnByValue: true,
-                }));
-                if (evalResult.exceptionDetails) {
-                    const desc = evalResult.exceptionDetails.exception?.description || 'Unknown';
-                    return {
-                        isError: true,
-                        content: [{ type: 'text', text: `[JS_ERROR] flow 실행 중 예외: ${desc}` }],
-                    };
+                let segment;
+                if (state.platform === 'ios') {
+                    // iOS WebKit의 Runtime.evaluate는 awaitPromise를 무시하고 Promise를 {}로 반환 →
+                    // 전역에 결과를 저장한 뒤 폴링해서 SegmentResult를 얻는다.
+                    const M = '__nestFlowSeg';
+                    await cdp.send('Runtime.evaluate', {
+                        expression: `window.${M}={done:false}; Promise.resolve(${expr}).then(r=>{window.${M}={done:true,value:r}}).catch(e=>{window.${M}={done:true,error:String((e&&e.message)||e)}}); 0`,
+                    });
+                    const end = Date.now() + 30_000;
+                    let polled = {};
+                    while (Date.now() < end) {
+                        const r = (await cdp.send('Runtime.evaluate', {
+                            expression: `JSON.stringify(window.${M})`,
+                            returnByValue: true,
+                        }));
+                        polled = JSON.parse(r.result.value);
+                        if (polled.done)
+                            break;
+                        await new Promise((res) => setTimeout(res, 50));
+                    }
+                    if (!polled.done) {
+                        return {
+                            isError: true,
+                            content: [{ type: 'text', text: `[WAIT_TIMEOUT] flow 세그먼트가 30초 내 완료되지 않았습니다.` }],
+                        };
+                    }
+                    if (polled.error) {
+                        return {
+                            isError: true,
+                            content: [{ type: 'text', text: `[JS_ERROR] flow 실행 중 예외: ${polled.error}` }],
+                        };
+                    }
+                    segment = polled.value;
                 }
-                const segment = evalResult.result.value;
+                else {
+                    const evalResult = (await cdp.send('Runtime.evaluate', {
+                        expression: expr,
+                        awaitPromise: true,
+                        returnByValue: true,
+                    }));
+                    if (evalResult.exceptionDetails) {
+                        const desc = evalResult.exceptionDetails.exception?.description || 'Unknown';
+                        return {
+                            isError: true,
+                            content: [{ type: 'text', text: `[JS_ERROR] flow 실행 중 예외: ${desc}` }],
+                        };
+                    }
+                    segment = evalResult.result.value;
+                }
                 allMarks.push(...segment.marks);
                 totalMs += segment.totalMs;
                 if (segment.captured)
