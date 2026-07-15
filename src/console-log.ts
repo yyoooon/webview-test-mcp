@@ -64,6 +64,11 @@ export class ConsoleBuffer {
       );
       this.push({ kind: 'exception', level: 'error', text });
     });
+    cdp.on('Console.messageAdded', (params) => {
+      const p = params as { message?: { level?: string; text?: string } };
+      this.push({ kind: 'console', level: p.message?.level ?? 'log', text: (p.message?.text ?? '').slice(0, MAX_TEXT_LENGTH) });
+    });
     await cdp.send('Runtime.enable');
+    await cdp.send('Console.enable').catch(() => {});
   }
 }

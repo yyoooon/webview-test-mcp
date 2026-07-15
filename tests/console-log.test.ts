@@ -79,4 +79,16 @@ describe('ConsoleBuffer', () => {
     });
     expect(buffer.since(0)[0].text).toHaveLength(300);
   });
+
+  it('records Console.messageAdded (iOS WebKit event)', async () => {
+    const cdp = makeFakeCdp();
+    const buffer = new ConsoleBuffer();
+    await buffer.attach(cdp as any);
+    cdp.handlers['Console.messageAdded']({
+      message: { level: 'error', text: 'boom' },
+    });
+    expect(buffer.since(0)).toEqual([
+      { kind: 'console', level: 'error', text: 'boom' },
+    ]);
+  });
 });
