@@ -1,4 +1,4 @@
-import { ensureConnected } from '../state.js';
+import { ensureConnected, state } from '../state.js';
 import type { CdpClient } from '../cdp.js';
 
 export const definition = {
@@ -53,6 +53,14 @@ async function getElementRect(
   return JSON.parse(res.result.value) as Rect;
 }
 
+async function getViewportRect(cdp: CdpClient): Promise<Rect> {
+  const res = (await cdp.send('Runtime.evaluate', {
+    expression: 'JSON.stringify({x:0,y:0,width:window.innerWidth,height:window.innerHeight})',
+    returnByValue: true,
+  })) as { result: { value: string } };
+  return JSON.parse(res.result.value) as Rect;
+}
+
 export async function handler(
   args: { selector?: string; format?: 'png' | 'jpeg'; quality?: number } = {},
 ) {
@@ -86,20 +94,26 @@ export async function handler(
       };
     }
 
-    const result = (await cdp.send('Page.captureScreenshot', params)) as {
-      data: string;
-    };
+    let data: string;
+    let mime: 'image/jpeg' | 'image/png';
+    if (state.platform === 'ios') {
+      // iOS: Page.captureScreenshot 미지원 → snapshotRect (dataURL 반환)
+      const rect = (params.clip as Rect | undefined) ?? (await getViewportRect(cdp));
+      const res = (await cdp.send('Page.snapshotRect', {
+        x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+        coordinateSystem: 'Viewport',
+      })) as { dataURL: string };
+      const comma = res.dataURL.indexOf(',');
+      data = res.dataURL.slice(comma + 1);
+      mime = res.dataURL.startsWith('data:image/png') ? 'image/png' : 'image/jpeg';
+    } else {
+      const res = (await cdp.send('Page.captureScreenshot', params)) as { data: string };
+      data = res.data;
+      mime = format === 'jpeg' ? 'image/jpeg' : 'image/png';
+    }
 
     return {
-      content: [
-        {
-          type: 'image' as const,
-          data: result.data,
-          mimeType: (format === 'jpeg' ? 'image/jpeg' : 'image/png') as
-            | 'image/jpeg'
-            | 'image/png',
-        },
-      ],
+      content: [{ type: 'image' as const, data, mimeType: mime }],
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
