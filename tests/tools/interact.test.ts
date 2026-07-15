@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { clickHandler, typeHandler } from '../../src/tools/interact.js';
 import * as stateModule from '../../src/state.js';
 
@@ -69,5 +69,48 @@ describe('typeHandler', () => {
     stateModule.state.cdp = makeFakeCdp() as any;
     const result = await typeHandler({ selector: '#input' } as any);
     expect(result.isError).toBe(true);
+  });
+});
+
+describe('clickHandler (iOS)', () => {
+  beforeEach(() => { vi.clearAllMocks(); stateModule.resetState(); stateModule.state.platform = 'ios'; });
+  afterEach(() => { stateModule.state.platform = null; });
+
+  it('clicks element via Runtime.evaluate elementFromPoint, not Input.dispatchMouseEvent', async () => {
+    const fakeCdp = makeFakeCdp();
+    stateModule.state.cdp = fakeCdp as any;
+    const result = await clickHandler({ selector: '#submit-btn' });
+    expect(result.isError).toBeUndefined();
+    const inputCalls = fakeCdp.send.mock.calls.filter((c: any) => c[0] === 'Input.dispatchMouseEvent');
+    expect(inputCalls.length).toBe(0);
+    const clickEvalCall = fakeCdp.send.mock.calls.find(
+      (c: any) => c[0] === 'Runtime.evaluate' && c[1].expression.includes('elementFromPoint') && c[1].expression.includes('.click()'),
+    );
+    expect(clickEvalCall).toBeDefined();
+  });
+
+  it('returns error when element not found (iOS)', async () => {
+    const fakeCdp = makeFakeCdp({ result: { value: '{"error":"not_found","similar":[]}' } });
+    stateModule.state.cdp = fakeCdp as any;
+    const result = await clickHandler({ selector: '#nonexistent' });
+    expect(result.isError).toBe(true);
+  });
+});
+
+describe('typeHandler (iOS)', () => {
+  beforeEach(() => { vi.clearAllMocks(); stateModule.resetState(); stateModule.state.platform = 'ios'; });
+  afterEach(() => { stateModule.state.platform = null; });
+
+  it('types via Runtime.evaluate value-setter, not Input.insertText', async () => {
+    const fakeCdp = makeFakeCdp();
+    stateModule.state.cdp = fakeCdp as any;
+    const result = await typeHandler({ selector: 'input[name="email"]', value: 'test@test.com' });
+    expect(result.isError).toBeUndefined();
+    const insertCalls = fakeCdp.send.mock.calls.filter((c: any) => c[0] === 'Input.insertText');
+    expect(insertCalls.length).toBe(0);
+    const typeEvalCall = fakeCdp.send.mock.calls.find(
+      (c: any) => c[0] === 'Runtime.evaluate' && c[1].expression.includes('elementFromPoint') && c[1].expression.includes('test@test.com'),
+    );
+    expect(typeEvalCall).toBeDefined();
   });
 });

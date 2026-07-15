@@ -1,4 +1,4 @@
-import { ensureConnected } from '../state.js';
+import { ensureConnected, state } from '../state.js';
 import type { CdpClient } from '../cdp.js';
 
 export const clickDefinition = {
@@ -82,26 +82,50 @@ function buildFindScript(selector?: string, text?: string, clearValue = false): 
   return '';
 }
 
-async function findAndClick(cdp: CdpClient, selector?: string, text?: string, clearValue = false) {
+const IOS_CLICK = (x: number, y: number) => `(() => {
+  const el = document.elementFromPoint(${x}, ${y});
+  if (!el) return JSON.stringify({ error: 'no_element' });
+  el.click();
+  return JSON.stringify({ ok: true });
+})()`;
+
+const IOS_TYPE = (x: number, y: number, value: string) => `(() => {
+  const el = document.elementFromPoint(${x}, ${y});
+  if (!el) return JSON.stringify({ error: 'no_element' });
+  el.focus();
+  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value') && Object.getOwnPropertyDescriptor(proto, 'value').set;
+  if (setter) setter.call(el, ${JSON.stringify(value)}); else el.value = ${JSON.stringify(value)};
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  return JSON.stringify({ ok: true });
+})()`;
+
+async function resolveCoords(cdp: CdpClient, selector?: string, text?: string, clearValue = false):
+  Promise<{ x: number; y: number } | { errorResponse: { isError: true; content: { type: 'text'; text: string }[] } }> {
   const script = buildFindScript(selector, text, clearValue);
-  if (!script) {
-    return { isError: true, content: [{ type: 'text' as const, text: 'selector 또는 text 중 하나는 필수입니다.' }] };
-  }
+  if (!script) return { errorResponse: { isError: true, content: [{ type: 'text' as const, text: 'selector 또는 text 중 하나는 필수입니다.' }] } };
   const evalResult = (await cdp.send('Runtime.evaluate', { expression: script, returnByValue: true })) as { result: { value: string } };
   const coords = JSON.parse(evalResult.result.value);
   if (coords.error === 'not_found') {
     const hint = coords.similar?.length ? '\n유사한 요소:\n' + coords.similar.map((s: any) => `  <${s.tag}> "${s.text}"`).join('\n') : '';
-    return { isError: true, content: [{ type: 'text' as const, text: `요소를 찾을 수 없습니다.${hint}` }] };
+    return { errorResponse: { isError: true, content: [{ type: 'text' as const, text: `요소를 찾을 수 없습니다.${hint}` }] } };
   }
-  await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: coords.x, y: coords.y, button: 'left', clickCount: 1 });
-  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: coords.x, y: coords.y, button: 'left', clickCount: 1 });
-  return { content: [{ type: 'text' as const, text: `클릭 완료 (${Math.round(coords.x)}, ${Math.round(coords.y)})` }] };
+  return { x: coords.x, y: coords.y };
 }
 
 export async function clickHandler(args: { selector?: string; text?: string }) {
   try {
     const cdp = await ensureConnected();
-    return await findAndClick(cdp, args.selector, args.text);
+    const coords = await resolveCoords(cdp, args.selector, args.text);
+    if ('errorResponse' in coords) return coords.errorResponse;
+    if (state.platform === 'ios') {
+      await cdp.send('Runtime.evaluate', { expression: IOS_CLICK(coords.x, coords.y), returnByValue: true });
+    } else {
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: coords.x, y: coords.y, button: 'left', clickCount: 1 });
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: coords.x, y: coords.y, button: 'left', clickCount: 1 });
+    }
+    return { content: [{ type: 'text' as const, text: `클릭 완료 (${Math.round(coords.x)}, ${Math.round(coords.y)})` }] };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return { isError: true, content: [{ type: 'text' as const, text: `클릭 실패: ${msg}` }] };
@@ -114,9 +138,15 @@ export async function typeHandler(args: { selector?: string; text?: string; valu
       return { isError: true, content: [{ type: 'text' as const, text: 'value는 필수입니다.' }] };
     }
     const cdp = await ensureConnected();
-    const clickResult = await findAndClick(cdp, args.selector, args.text, true);
-    if (clickResult.isError) return clickResult;
-    await cdp.send('Input.insertText', { text: args.value });
+    const coords = await resolveCoords(cdp, args.selector, args.text, true);
+    if ('errorResponse' in coords) return coords.errorResponse;
+    if (state.platform === 'ios') {
+      await cdp.send('Runtime.evaluate', { expression: IOS_TYPE(coords.x, coords.y, args.value), returnByValue: true });
+    } else {
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: coords.x, y: coords.y, button: 'left', clickCount: 1 });
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: coords.x, y: coords.y, button: 'left', clickCount: 1 });
+      await cdp.send('Input.insertText', { text: args.value });
+    }
     return { content: [{ type: 'text' as const, text: `입력 완료: "${args.value}"` }] };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
