@@ -3,7 +3,7 @@ import { ConsoleBuffer } from './console-log.js';
 import { pickDevice, pickSocket } from './discovery.js';
 import { forwardPort } from './adb.js';
 import { IosTargetTransport } from './transport.js';
-import { ensureProxy, getDevicePort, listPages, stopProxy } from './ios.js';
+import { ensureProxy, discoverIosPages, stopProxy } from './ios.js';
 
 export interface ConnectionState {
   cdp: CdpClient | null;
@@ -68,14 +68,12 @@ async function autoDiscoverAndConnect(): Promise<CdpClient> {
   return cdp;
 }
 
-/** iOS 연결: 프록시 기동 → device port 조회 → 페이지 존재 조기 검증 → CdpClient 연결. */
+/** iOS 연결: 프록시 기동 → device port 조회·페이지 열거까지 폴링(콜드스타트 레이스 방어) → CdpClient 연결. */
 export async function connectIos(
   select: { index?: number; urlMatch?: string },
 ): Promise<{ cdp: CdpClient; devicePort: number; pageUrl: string | null }> {
   const frontPort = await ensureProxy();
-  const devicePort = await getDevicePort(frontPort);
-  // 페이지 없으면 여기서 NO_WEBVIEW로 조기 throw (cdp.connect의 generic 에러보다 친절)
-  await listPages(devicePort);
+  const { devicePort } = await discoverIosPages(frontPort);
   const opts: { index?: number; urlMatch?: string } = {};
   if (select.urlMatch) opts.urlMatch = select.urlMatch;
   else if (select.index !== undefined) opts.index = select.index;

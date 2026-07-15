@@ -86,3 +86,21 @@ export async function listPages(devicePort: number): Promise<IosPage[]> {
   if (!pages || pages.length === 0) throw new FlowError(ErrorCode.NO_WEBVIEW);
   return pages;
 }
+
+/** proxy 갓 spawn 시 기기 인스펙터가 cold라 첫 listPages가 빈 목록일 수 있음 → 페이지 열거까지 폴링. */
+export async function discoverIosPages(
+  frontPort: number,
+  timeoutMs = 8000,
+): Promise<{ devicePort: number; pages: IosPage[] }> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      const devicePort = await getDevicePort(frontPort);
+      const pages = await listPages(devicePort);
+      return { devicePort, pages };
+    } catch (e) {
+      if (Date.now() >= deadline) throw e;
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
