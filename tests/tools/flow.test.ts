@@ -392,6 +392,41 @@ describe('flowHandler — iOS awaitPromise fallback', () => {
   });
 });
 
+describe('flowHandler — iOS control gating', () => {
+  beforeEach(() => { vi.clearAllMocks(); stateModule.resetState(); stateModule.state.platform = 'ios'; });
+  afterEach(() => { stateModule.state.platform = null; });
+
+  it('rejects osTap on iOS instead of calling adb', async () => {
+    const segment1 = {
+      marks: [{ i: 0, kind: 'osTap', ok: true, ms: 1, x: 100, y: 200 }],
+      totalMs: 1,
+      control: { type: 'osTap', i: 0, x: 100, y: 200, selector: '#btn' },
+    };
+    const cdp = {
+      connected: true,
+      send: vi.fn().mockImplementation((method: string, params?: any) => {
+        if (method === 'Runtime.evaluate') {
+          if (params?.returnByValue) {
+            return Promise.resolve({
+              result: { value: JSON.stringify({ done: true, value: segment1 }) },
+            });
+          }
+          return Promise.resolve({ result: { value: undefined } });
+        }
+        return Promise.resolve({});
+      }),
+    };
+    stateModule.state.cdp = cdp as any;
+
+    const result = await flowHandler({ steps: [{ osTap: '#btn' }] });
+
+    expect(result.isError).toBe(true);
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain('osTap/osSwipe/osKey');
+    expect(adbModule.inputTap).not.toHaveBeenCalled();
+  });
+});
+
 describe('flowHandler — console attachment', () => {
   beforeEach(() => { vi.clearAllMocks(); stateModule.resetState(); });
 
