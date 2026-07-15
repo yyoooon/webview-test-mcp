@@ -47,7 +47,7 @@ export function isConnected(): boolean {
 export async function attachConsole(cdp: CdpClient): Promise<void> {
   try {
     const buffer = new ConsoleBuffer();
-    await buffer.attach(cdp);
+    await buffer.attach(cdp, state.platform);
     state.console = buffer;
   } catch {
     state.console = null;

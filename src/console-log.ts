@@ -48,7 +48,7 @@ export class ConsoleBuffer {
     return this.entries.slice(Math.max(0, cursor - firstKept));
   }
 
-  async attach(cdp: CdpClient): Promise<void> {
+  async attach(cdp: CdpClient, platform?: 'android' | 'ios' | null): Promise<void> {
     cdp.on('Runtime.consoleAPICalled', (params) => {
       const p = params as { type?: string; args?: RemoteObject[] };
       this.push({ kind: 'console', level: p.type ?? 'log', text: formatArgs(p.args ?? []) });
@@ -64,11 +64,15 @@ export class ConsoleBuffer {
       );
       this.push({ kind: 'exception', level: 'error', text });
     });
-    cdp.on('Console.messageAdded', (params) => {
-      const p = params as { message?: { level?: string; text?: string } };
-      this.push({ kind: 'console', level: p.message?.level ?? 'log', text: (p.message?.text ?? '').slice(0, MAX_TEXT_LENGTH) });
-    });
+    if (platform === 'ios') {
+      cdp.on('Console.messageAdded', (params) => {
+        const p = params as { message?: { level?: string; text?: string } };
+        this.push({ kind: 'console', level: p.message?.level ?? 'log', text: (p.message?.text ?? '').slice(0, MAX_TEXT_LENGTH) });
+      });
+    }
     await cdp.send('Runtime.enable');
-    await cdp.send('Console.enable').catch(() => {});
+    if (platform === 'ios') {
+      await cdp.send('Console.enable').catch(() => {});
+    }
   }
 }
