@@ -1,3 +1,5 @@
+import WebSocket from 'ws';
+
 export interface CdpOutbound {
   id: number;
   method: string;
@@ -49,4 +51,35 @@ export function unwrapFromTarget(raw: Record<string, unknown>): Unwrapped {
     return { kind: 'targetDestroyed', targetId: params.targetId as string };
   }
   return { kind: 'other' };
+}
+
+export class RawTransport implements Transport {
+  private ws: WebSocket | null = null;
+  private messageCb: (msg: CdpInbound) => void = () => {};
+  private closeCb: () => void = () => {};
+
+  constructor(private wsUrl: string) {}
+
+  connect(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      this.ws = new WebSocket(this.wsUrl);
+      this.ws.on('open', () => resolve());
+      this.ws.on('message', (data: WebSocket.Data) => {
+        this.messageCb(JSON.parse(data.toString()) as CdpInbound);
+      });
+      this.ws.on('close', () => this.closeCb());
+      this.ws.on('error', (err: Error) => reject(err));
+    });
+  }
+
+  send(msg: CdpOutbound): void {
+    this.ws!.send(JSON.stringify(msg));
+  }
+
+  onMessage(cb: (msg: CdpInbound) => void): void { this.messageCb = cb; }
+  onClose(cb: () => void): void { this.closeCb = cb; }
+
+  close(): void {
+    if (this.ws) { this.ws.close(); this.ws = null; }
+  }
 }

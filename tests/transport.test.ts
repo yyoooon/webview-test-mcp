@@ -1,5 +1,19 @@
-import { describe, it, expect } from 'vitest';
-import { wrapForTarget, unwrapFromTarget } from '../src/transport.js';
+import { describe, it, expect, vi } from 'vitest';
+import WebSocket from 'ws';
+import { wrapForTarget, unwrapFromTarget, RawTransport } from '../src/transport.js';
+
+vi.mock('ws', () => {
+  const MockWebSocket = vi.fn().mockImplementation(() => {
+    const listeners: Record<string, Function[]> = {};
+    return {
+      on(event: string, cb: Function) { (listeners[event] ??= []).push(cb); },
+      send: vi.fn(),
+      close: vi.fn(),
+      _emit(event: string, ...args: any[]) { for (const cb of listeners[event] || []) cb(...args); },
+    };
+  });
+  return { default: MockWebSocket };
+});
 
 describe('wrapForTarget', () => {
   it('wraps a CDP command into Target.sendMessageToTarget with stringified inner message', () => {
@@ -37,5 +51,45 @@ describe('unwrapFromTarget', () => {
 
   it('classifies an envelope ack (no method) as other', () => {
     expect(unwrapFromTarget({ id: 100, result: {} })).toEqual({ kind: 'other' });
+  });
+});
+
+describe('RawTransport', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('resolves connect on ws open and forwards parsed messages', async () => {
+    const t = new RawTransport('ws://x/1');
+    const received: any[] = [];
+    t.onMessage((m) => received.push(m));
+    const p = t.connect();
+    const ws = vi.mocked(WebSocket).mock.results.at(-1)!.value;
+    ws._emit('open');
+    await p;
+    ws._emit('message', JSON.stringify({ id: 1, result: { ok: true } }));
+    expect(received).toEqual([{ id: 1, result: { ok: true } }]);
+  });
+
+  it('send serializes the raw CDP message to ws', async () => {
+    const t = new RawTransport('ws://x/1');
+    const p = t.connect();
+    const ws = vi.mocked(WebSocket).mock.results.at(-1)!.value;
+    ws._emit('open');
+    await p;
+    t.send({ id: 3, method: 'Runtime.evaluate', params: { expression: '2' } });
+    expect(JSON.parse(ws.send.mock.calls[0][0])).toEqual({ id: 3, method: 'Runtime.evaluate', params: { expression: '2' } });
+  });
+
+  it('onClose fires when ws closes', async () => {
+    const t = new RawTransport('ws://x/1');
+    const closed = vi.fn();
+    t.onClose(closed);
+    const p = t.connect();
+    const ws = vi.mocked(WebSocket).mock.results.at(-1)!.value;
+    ws._emit('open');
+    await p;
+    ws._emit('close');
+    expect(closed).toHaveBeenCalled();
   });
 });
