@@ -165,6 +165,12 @@ export async function flowHandler(args: Partial<FlowInput>) {
           if (polled.done) break;
           await new Promise((res) => setTimeout(res, 50));
         }
+        if (!polled.done) {
+          return {
+            isError: true,
+            content: [{ type: 'text' as const, text: `[WAIT_TIMEOUT] flow 세그먼트가 30초 내 완료되지 않았습니다.` }],
+          };
+        }
         if (polled.error) {
           return {
             isError: true,
