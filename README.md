@@ -7,9 +7,11 @@
 
 ## 1. 한 줄 소개
 
-**AI 에이전트(Claude)가 실제 Android 기기의 WebView에 직접 붙어서 UI를 조작·검증할 수 있게 해주는 MCP 서버.**
+**AI 에이전트(Claude)가 실제 Android·iOS 기기의 WebView에 직접 붙어서 UI를 조작·검증할 수 있게 해주는 MCP 서버.**
 
-개발자가 "이 기능 실기기에서 되는지 확인해줘"라고 말하면, Claude가 ADB로 폰을 찾고, Chrome DevTools Protocol(CDP)로 WebView에 접속해서, 클릭·입력·스타일 검사·스크린샷까지 수행하고 결과를 보고한다.
+개발자가 "이 기능 실기기에서 되는지 확인해줘"라고 말하면, Claude가 폰을 찾고(Android는 ADB, iOS는 `ios-webkit-debug-proxy`), Chrome DevTools Protocol(CDP)로 WebView에 접속해서, 클릭·입력·스타일 검사·스크린샷까지 수행하고 결과를 보고한다.
+
+> **iOS 지원**: `webview_connect({ platform: "ios" })`로 iPhone Safari/WKWebView에도 붙는다. 사전조건은 `brew install ios-webkit-debug-proxy` + USB 연결 + Safari 웹 인스펙터 ON + (맥 웹 인스펙터 창은 닫기). 동작 원리·명령 차이·한계는 [docs/ios-webview-verification.md](docs/ios-webview-verification.md) 참고. `platform` 생략 시 연결된 기기로 자동 감지.
 
 ---
 

@@ -1270,3 +1270,332 @@ git commit -m "[문서] iOS 웹뷰 지원 검증 절차·사전조건"
 **Type consistency:** `CdpOutbound`/`CdpInbound`/`Transport`/`SelectOpts`/`selectTarget`/`connectIos` 시그니처가 Task 1·3·8·9 간 일치. `wrapForTarget`/`unwrapFromTarget` 반환형 `Unwrapped`가 Task 1·4 간 일치.
 
 **주의:** Task 3는 `cdp.test.ts` 무수정 통과가 목표지만, 실제 실행 시 mock 충돌이 나면 mock을 파일-로컬로 유지(각 test 파일이 자체 `vi.mock('ws')`)하는 것으로 해결. Task 9의 iOS `Runtime.evaluate`는 `returnByValue: true` 필수(WebKit).
+
+---
+---
+
+# 실기기 검증 후속 수정 (Task 13 통합검증에서 발견)
+
+Task 13 실기기 검증 결과 핵심(connect/evaluate/dom/screenshot/console)은 작동하나, 완전 파서티를 위해 3건 수정 필요. 원인은 전부 실기기로 확정됨.
+
+## Task 14: iOS 콜드스타트 레이스 수정 (P1)
+
+**문제(실측):** `ios-webkit-debug-proxy`가 완전히 종료된 상태에서 새로 spawn하면, 기기 인스펙터가 cold라 첫 `listPages`가 빈 목록을 받아 `NO_WEBVIEW`로 실패한다(재현율 높음, connect flaky). 아무 proxy나 살아있으면 warm. 재시도가 없는 게 원인.
+
+**해결:** ios.ts에 페이지가 실제로 열거될 때까지 폴링하는 `discoverIosPages`를 추가하고, `connectIos`가 이를 쓰도록 교체.
+
+**Files:**
+- Modify: `src/ios.ts` (add `discoverIosPages`)
+- Modify: `src/state.ts` (`connectIos`가 `discoverIosPages` 사용)
+- Test: `tests/ios.test.ts` (fetch 목으로 빈→채워짐 폴링 검증)
+
+**Interfaces:**
+- Produces: `export async function discoverIosPages(frontPort: number, timeoutMs?: number): Promise<{ devicePort: number; pages: IosPage[] }>;`
+
+- [ ] **Step 1: Write the failing test**
+
+`tests/ios.test.ts`에 추가:
+```ts
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { discoverIosPages } from '../src/ios.js';
+
+describe('discoverIosPages', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it('polls until pages appear', async () => {
+    let deviceCall = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('9330')) {
+        return { ok: true, json: async () => [{ deviceId: 'D', url: '127.0.0.1:9331' }] };
+      }
+      // device port: 첫 호출 빈 목록, 두 번째부터 페이지 있음
+      deviceCall += 1;
+      return { ok: true, json: async () => (deviceCall >= 2
+        ? [{ url: 'https://x/', webSocketDebuggerUrl: 'ws://x/1' }]
+        : []) };
+    }));
+    const { devicePort, pages } = await discoverIosPages(9330, 3000);
+    expect(devicePort).toBe(9331);
+    expect(pages).toHaveLength(1);
+    expect(deviceCall).toBeGreaterThanOrEqual(2);
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npx vitest run tests/ios.test.ts`
+Expected: FAIL — `discoverIosPages is not a function`
+
+- [ ] **Step 3: Implement**
+
+`src/ios.ts`에 추가:
+```ts
+/** proxy 갓 spawn 시 기기 인스펙터가 cold라 첫 listPages가 빈 목록일 수 있음 → 페이지 열거까지 폴링. */
+export async function discoverIosPages(
+  frontPort: number,
+  timeoutMs = 8000,
+): Promise<{ devicePort: number; pages: IosPage[] }> {
+  const deadline = Date.now() + timeoutMs;
+  let lastErr: unknown;
+  while (Date.now() < deadline) {
+    try {
+      const devicePort = await getDevicePort(frontPort);
+      const pages = await listPages(devicePort);
+      if (pages.length) return { devicePort, pages };
+    } catch (e) {
+      lastErr = e; // NO_DEVICE/NO_WEBVIEW → 재시도
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  // 타임아웃: 마지막 시도로 적절한 FlowError 전파
+  const devicePort = await getDevicePort(frontPort);
+  return { devicePort, pages: await listPages(devicePort) };
+  void lastErr;
+}
+```
+(`void lastErr;`는 도달 불가 — 제거하고 lastErr 변수도 빼도 됨. 구현자 판단으로 미사용 변수 없이 정리.)
+
+- [ ] **Step 4: `connectIos`가 `discoverIosPages` 사용하도록 교체**
+
+`src/state.ts`의 `connectIos`에서 `getDevicePort` + `listPages` 두 호출을 `discoverIosPages`로 교체:
+```ts
+export async function connectIos(
+  select: { index?: number; urlMatch?: string },
+): Promise<{ cdp: CdpClient; devicePort: number; pageUrl: string | null }> {
+  const frontPort = await ensureProxy();
+  const { devicePort } = await discoverIosPages(frontPort); // 콜드스타트 레이스 방어(폴링)
+  const opts: { index?: number; urlMatch?: string } = {};
+  if (select.urlMatch) opts.urlMatch = select.urlMatch;
+  else if (select.index !== undefined) opts.index = select.index;
+  const cdp = new CdpClient((wsUrl) => new IosTargetTransport(wsUrl));
+  await cdp.connect(devicePort, opts);
+  return { cdp, devicePort, pageUrl: cdp.pageUrl };
+}
+```
+`src/state.ts` 상단 import를 `import { ensureProxy, discoverIosPages, stopProxy } from './ios.js';`로 갱신(더 이상 `getDevicePort`/`listPages` 직접 사용 안 함).
+
+- [ ] **Step 5: Verify**
+
+Run: `npx vitest run && npx tsc --noEmit`
+Expected: 전체 green (신규 discoverIosPages 테스트 포함), tsc clean.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/ios.ts src/state.ts tests/ios.test.ts
+git commit -m "[수정] iOS 콜드스타트 레이스 — 페이지 열거까지 폴링"
+```
+
+---
+
+## Task 15: iOS click/type 구현 (P2)
+
+**문제(실측):** iOS WebKit엔 `Input` 도메인이 없어 `Input.dispatchMouseEvent`/`Input.insertText`가 `'Input' domain was not found`로 실패. `webview_click`/`webview_type`이 iOS에서 동작 안 함.
+
+**해결:** 좌표 찾기(`buildFindScript`)는 그대로 재사용하고, **액션만** 플랫폼 분기. iOS는 `Runtime.evaluate`로 `document.elementFromPoint(x,y)`에 `.click()`/value 주입(evaluate는 iOS 작동 확인됨). Android 경로는 무변경.
+
+**Files:**
+- Modify: `src/tools/interact.ts`
+- Test: `tests/tools/interact.test.ts` (iOS 분기: Input.* 대신 evaluate 사용 확인)
+
+- [ ] **Step 1: Write the failing test**
+
+`tests/tools/interact.test.ts`에 iOS 케이스 추가(기존 mock cdp 패턴 재사용; `state.platform='ios'` 설정). 핵심 단언:
+- iOS click: `cdp.send`가 `Input.dispatchMouseEvent`로 호출되지 **않고**, 좌표 찾기 후 `Runtime.evaluate`(expression에 `elementFromPoint`)가 호출됨.
+- iOS type: `Input.insertText` 미호출, 대신 `Runtime.evaluate`로 value 주입.
+(정확한 mock 형태는 기존 interact.test.ts 스타일을 따르되, iOS일 때 `Input.*` send가 0회임을 assert.)
+
+- [ ] **Step 2: Run → fail** (`npx vitest run tests/tools/interact.test.ts`)
+
+- [ ] **Step 3: Implement**
+
+`src/tools/interact.ts`:
+- import에 `state` 추가: `import { ensureConnected } from '../state.js';` → `import { ensureConnected, state } from '../state.js';`
+- `findAndClick`를 "좌표 찾기"와 "액션"으로 분리. 좌표 찾는 부분(`buildFindScript`→evaluate→parse→not_found 처리)을 `resolveCoords(cdp, selector, text, clearValue)`로 추출(coords 또는 에러 응답 반환). 그런 다음:
+
+```ts
+const IOS_CLICK = (x: number, y: number) => `(() => {
+  const el = document.elementFromPoint(${x}, ${y});
+  if (!el) return JSON.stringify({ error: 'no_element' });
+  el.click();
+  return JSON.stringify({ ok: true });
+})()`;
+
+const IOS_TYPE = (x: number, y: number, value: string) => `(() => {
+  const el = document.elementFromPoint(${x}, ${y});
+  if (!el) return JSON.stringify({ error: 'no_element' });
+  el.focus();
+  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value') && Object.getOwnPropertyDescriptor(proto, 'value').set;
+  if (setter) setter.call(el, ${JSON.stringify(value)}); else el.value = ${JSON.stringify(value)};
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  return JSON.stringify({ ok: true });
+})()`;
+```
+
+`clickHandler`:
+```ts
+export async function clickHandler(args: { selector?: string; text?: string }) {
+  try {
+    const cdp = await ensureConnected();
+    const coords = await resolveCoords(cdp, args.selector, args.text);
+    if ('errorResponse' in coords) return coords.errorResponse;
+    if (state.platform === 'ios') {
+      await cdp.send('Runtime.evaluate', { expression: IOS_CLICK(coords.x, coords.y), returnByValue: true });
+    } else {
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: coords.x, y: coords.y, button: 'left', clickCount: 1 });
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: coords.x, y: coords.y, button: 'left', clickCount: 1 });
+    }
+    return { content: [{ type: 'text' as const, text: `클릭 완료 (${Math.round(coords.x)}, ${Math.round(coords.y)})` }] };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return { isError: true, content: [{ type: 'text' as const, text: `클릭 실패: ${msg}` }] };
+  }
+}
+```
+
+`typeHandler`:
+```ts
+export async function typeHandler(args: { selector?: string; text?: string; value?: string }) {
+  try {
+    if (!args.value) return { isError: true, content: [{ type: 'text' as const, text: 'value는 필수입니다.' }] };
+    const cdp = await ensureConnected();
+    const coords = await resolveCoords(cdp, args.selector, args.text, true);
+    if ('errorResponse' in coords) return coords.errorResponse;
+    if (state.platform === 'ios') {
+      await cdp.send('Runtime.evaluate', { expression: IOS_TYPE(coords.x, coords.y, args.value), returnByValue: true });
+    } else {
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: coords.x, y: coords.y, button: 'left', clickCount: 1 });
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: coords.x, y: coords.y, button: 'left', clickCount: 1 });
+      await cdp.send('Input.insertText', { text: args.value });
+    }
+    return { content: [{ type: 'text' as const, text: `입력 완료: "${args.value}"` }] };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return { isError: true, content: [{ type: 'text' as const, text: `입력 실패: ${msg}` }] };
+  }
+}
+```
+
+`resolveCoords` (findAndClick에서 추출, 액션 제거):
+```ts
+async function resolveCoords(cdp: CdpClient, selector?: string, text?: string, clearValue = false):
+  Promise<{ x: number; y: number } | { errorResponse: { isError: true; content: { type: 'text'; text: string }[] } }> {
+  const script = buildFindScript(selector, text, clearValue);
+  if (!script) return { errorResponse: { isError: true, content: [{ type: 'text' as const, text: 'selector 또는 text 중 하나는 필수입니다.' }] } };
+  const evalResult = (await cdp.send('Runtime.evaluate', { expression: script, returnByValue: true })) as { result: { value: string } };
+  const coords = JSON.parse(evalResult.result.value);
+  if (coords.error === 'not_found') {
+    const hint = coords.similar?.length ? '\n유사한 요소:\n' + coords.similar.map((s: any) => `  <${s.tag}> "${s.text}"`).join('\n') : '';
+    return { errorResponse: { isError: true, content: [{ type: 'text' as const, text: `요소를 찾을 수 없습니다.${hint}` }] } };
+  }
+  return { x: coords.x, y: coords.y };
+}
+```
+기존 `findAndClick`는 제거(clickHandler/typeHandler가 직접 조합). Android 동작(같은 finder + 같은 Input.* 호출)은 그대로 보존.
+
+- [ ] **Step 4: Verify** — `npx vitest run && npx tsc --noEmit` (전체 green, 기존 android interact 테스트 유지)
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/tools/interact.ts tests/tools/interact.test.ts
+git commit -m "[수정] iOS click/type — Input 도메인 대신 evaluate"
+```
+
+---
+
+## Task 16: iOS flow awaitPromise 폴백 (P3)
+
+**문제(실측):** iOS WebKit의 `Runtime.evaluate`는 `awaitPromise: true`를 무시하고 Promise를 `{}`로 반환. flow는 async 표현식을 컴파일해 `awaitPromise`로 결과를 받으므로 iOS에서 `segment`가 `{}` → `segment.marks` undefined로 크래시. (동기 객체 `returnByValue`는 iOS 정상.)
+
+**해결:** iOS일 때만 `awaitPromise` 대신 "전역에 결과 저장 → 폴링" 패턴으로 SegmentResult를 얻는다. Android 경로는 무변경. (flow의 click/type은 컴파일된 in-page JS라 이미 iOS 작동 — 이 수정은 promise 결과 수신만 고침.)
+
+**Files:**
+- Modify: `src/tools/flow.ts`
+- Test: `tests/tools/flow.test.ts` (iOS 분기: 폴링으로 segment 수신 확인)
+
+- [ ] **Step 1: Write the failing test**
+
+`tests/tools/flow.test.ts`에 iOS 케이스 추가(기존 mock cdp 패턴; `state.platform='ios'`): mock cdp.send가 iOS 폴백 경로에서 (1) kickoff evaluate, (2) 폴링 evaluate에 `JSON.stringify({done:true,value:{marks:[],totalMs:1}})` 반환하도록 설정 → flowHandler가 정상 완료(에러 없이 marks 포함 결과 반환)하는지 assert.
+
+- [ ] **Step 2: Run → fail** (`npx vitest run tests/tools/flow.test.ts`)
+
+- [ ] **Step 3: Implement**
+
+`src/tools/flow.ts`의 세그먼트 실행부(현재 line 147-162, `awaitPromise` evaluate → `const segment = evalResult.result.value;`)를 플랫폼 분기로 교체:
+
+```ts
+const expr = compileFlow({ steps: remainingSteps, bail }, { startIndex });
+
+let segment: SegmentResult;
+if (state.platform === 'ios') {
+  // iOS WebKit은 awaitPromise 미지원 → 전역 저장 후 폴링
+  const M = '__nestFlowSeg';
+  await cdp.send('Runtime.evaluate', {
+    expression: `window.${M}={done:false}; Promise.resolve(${expr}).then(r=>{window.${M}={done:true,value:r}}).catch(e=>{window.${M}={done:true,error:String((e&&e.message)||e)}}); 0`,
+  });
+  const end = Date.now() + 30_000;
+  let polled: { done?: boolean; value?: SegmentResult; error?: string } = {};
+  while (Date.now() < end) {
+    const r = (await cdp.send('Runtime.evaluate', {
+      expression: `JSON.stringify(window.${M})`,
+      returnByValue: true,
+    })) as { result: { value: string } };
+    polled = JSON.parse(r.result.value);
+    if (polled.done) break;
+    await new Promise((res) => setTimeout(res, 50));
+  }
+  if (polled.error) {
+    return { isError: true, content: [{ type: 'text' as const, text: `[JS_ERROR] flow 실행 중 예외: ${polled.error}` }] };
+  }
+  segment = polled.value as SegmentResult;
+} else {
+  const evalResult = (await cdp.send('Runtime.evaluate', {
+    expression: expr,
+    awaitPromise: true,
+    returnByValue: true,
+  })) as { result: { value: SegmentResult }; exceptionDetails?: { exception?: { description?: string } } };
+  if (evalResult.exceptionDetails) {
+    const desc = evalResult.exceptionDetails.exception?.description || 'Unknown';
+    return { isError: true, content: [{ type: 'text' as const, text: `[JS_ERROR] flow 실행 중 예외: ${desc}` }] };
+  }
+  segment = evalResult.result.value;
+}
+
+allMarks.push(...segment.marks);
+```
+(이하 `totalMs += segment.totalMs;` 등 기존 로직 그대로.)
+
+**iOS 한계 문서화 대상:** flow의 `osTap`/`osSwipe`/`osKey`(control 타입)는 adb 의존이라 iOS 미지원 — Task 13 문서에 명시(별도 코드 변경 없음, 사용 시 adb 에러).
+
+- [ ] **Step 4: Verify** — `npx vitest run && npx tsc --noEmit` (전체 green, 기존 android flow 테스트 유지)
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/tools/flow.ts tests/tools/flow.test.ts
+git commit -m "[수정] iOS flow — awaitPromise 대신 전역 폴링"
+```
+
+---
+
+## Task 17: transport error→onClose 정리 (누적 Minor fix 웨이브) + 실기기 재검증 + 문서 + dist 빌드
+
+**Files:**
+- Modify: `src/transport.ts` (RawTransport·IosTargetTransport의 `error`(및 iOS close-before-announce) 시 `closeCb`/타이머 정리)
+- Create: `docs/ios-webview-verification.md`; Modify: `README.md`
+- Build: `dist/` 재생성 + 커밋
+
+- [ ] **Step 1: transport error→onClose 정리**
+
+리뷰 누적 Minor: 성공 연결 후 소켓 `error` 시 `closeCb` 미호출로 `connected=true` 잔류. RawTransport와 IosTargetTransport 모두 `ws.on('error')`에서 (connect 성공 이후라면) `closeCb()`도 호출하도록 보완. IosTargetTransport는 connect 전 close 시 타이머 정리도 추가. TDD로 회귀 테스트 1개(연결 후 error → onClose 발화) 추가.
+
+- [ ] **Step 2: 빌드 + 전체 회귀** — `npm run build && npx vitest run` (전체 green)
+
+- [ ] **Step 3: 실기기 재검증** — 통합 드라이버 재실행(콜드스타트 포함)해서 connect 안정성(P1)·click/type(P2)·flow(P3) 통과 확인. 결과를 `docs/ios-webview-verification.md`에 기록.
+
+- [ ] **Step 4: 문서** — `README.md`에 iOS 지원 + `brew install ios-webkit-debug-proxy` + 사전조건(USB·웹인스펙터·맥 인스펙터 닫기) + 한계(osTap 계열 adb 의존 iOS 미지원, macOS 전용, 시뮬레이터 미지원) 명시.
+
+- [ ] **Step 5: dist 커밋** — `npm run build` 후 `git add dist && git commit`으로 컴파일 산출물 동기화(플러그인이 dist로 실행). 문서/소스와 함께 커밋.
