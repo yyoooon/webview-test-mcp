@@ -68,7 +68,7 @@ export class RawTransport implements Transport {
         this.messageCb(JSON.parse(data.toString()) as CdpInbound);
       });
       this.ws.on('close', () => this.closeCb());
-      this.ws.on('error', (err: Error) => reject(err));
+      this.ws.on('error', (err: Error) => { this.closeCb(); reject(err); });
     });
   }
 
@@ -90,17 +90,22 @@ export class IosTargetTransport implements Transport {
   private closeCb: () => void = () => {};
   private pageTargetId: string | null = null;
   private onPageReady: (() => void) | null = null;
+  private announceTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private wsUrl: string) {}
 
   connect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       this.ws = new WebSocket(this.wsUrl);
-      const timer = setTimeout(
+      this.announceTimer = setTimeout(
         () => reject(new Error('iOS page target announce 타임아웃 (맥 웹 인스펙터 창을 닫으세요)')),
         5000,
       );
-      this.onPageReady = () => { clearTimeout(timer); resolve(); };
+      this.onPageReady = () => {
+        if (this.announceTimer) clearTimeout(this.announceTimer);
+        this.announceTimer = null;
+        resolve();
+      };
 
       this.ws.on('message', (data: WebSocket.Data) => {
         const raw = JSON.parse(data.toString()) as Record<string, unknown>;
@@ -115,7 +120,12 @@ export class IosTargetTransport implements Transport {
         // targetDestroyed / other → 무시
       });
       this.ws.on('close', () => this.closeCb());
-      this.ws.on('error', (err: Error) => { clearTimeout(timer); reject(err); });
+      this.ws.on('error', (err: Error) => {
+        if (this.announceTimer) clearTimeout(this.announceTimer);
+        this.announceTimer = null;
+        this.closeCb();
+        reject(err);
+      });
     });
   }
 
@@ -128,6 +138,7 @@ export class IosTargetTransport implements Transport {
   onClose(cb: () => void): void { this.closeCb = cb; }
 
   close(): void {
+    if (this.announceTimer) { clearTimeout(this.announceTimer); this.announceTimer = null; }
     if (this.ws) { this.ws.close(); this.ws = null; }
   }
 }

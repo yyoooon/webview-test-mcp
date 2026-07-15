@@ -92,6 +92,18 @@ describe('RawTransport', () => {
     ws._emit('close');
     expect(closed).toHaveBeenCalled();
   });
+
+  it('onClose fires when ws errors after a successful connect', async () => {
+    const t = new RawTransport('ws://x/1');
+    const closed = vi.fn();
+    t.onClose(closed);
+    const p = t.connect();
+    const ws = vi.mocked(WebSocket).mock.results.at(-1)!.value;
+    ws._emit('open');
+    await p;
+    ws._emit('error', new Error('socket died'));
+    expect(closed).toHaveBeenCalled();
+  });
 });
 
 describe('IosTargetTransport', () => {
@@ -120,5 +132,19 @@ describe('IosTargetTransport', () => {
       params: { targetId: 'page-9', message: JSON.stringify({ id: 5, result: { value: 1 } }) },
     }));
     expect(received).toContainEqual({ id: 5, result: { value: 1 } });
+  });
+
+  it('onClose fires when ws errors after page target announce', async () => {
+    const t = new IosTargetTransport('ws://ios/1');
+    const closed = vi.fn();
+    t.onClose(closed);
+    const p = t.connect();
+    const ws = vi.mocked(WebSocket).mock.results.at(-1)!.value;
+    ws._emit('message', JSON.stringify({
+      method: 'Target.targetCreated', params: { targetInfo: { targetId: 'page-9', type: 'page' } },
+    }));
+    await p;
+    ws._emit('error', new Error('socket died'));
+    expect(closed).toHaveBeenCalled();
   });
 });
