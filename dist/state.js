@@ -33,7 +33,7 @@ export function isConnected() {
 export async function attachConsole(cdp) {
     try {
         const buffer = new ConsoleBuffer();
-        await buffer.attach(cdp);
+        await buffer.attach(cdp, state.platform);
         state.console = buffer;
     }
     catch {

@@ -159,6 +159,18 @@ export async function flowHandler(args) {
                     captured = { ...(captured ?? {}), ...segment.captured };
                 if (segment.control) {
                     const c = segment.control;
+                    if (state.platform === 'ios' &&
+                        (c.type === 'osTap' || c.type === 'osSwipe' || c.type === 'osKey')) {
+                        return {
+                            isError: true,
+                            content: [
+                                {
+                                    type: 'text',
+                                    text: 'iOS에서는 osTap/osSwipe/osKey(OS-level 터치)를 지원하지 않습니다. 화면 내 조작은 click/type을 사용하세요.',
+                                },
+                            ],
+                        };
+                    }
                     let stop = false;
                     if (c.type === 'osTap') {
                         await inputTap(c.x, c.y, state.deviceId ?? undefined);
