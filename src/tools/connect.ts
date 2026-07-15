@@ -1,8 +1,9 @@
 import { CdpClient } from "../cdp.js";
-import { state, resetState, attachConsole } from "../state.js";
+import { state, resetState, attachConsole, connectIos } from "../state.js";
 import { forwardPort, removeForward, getProcessName } from "../adb.js";
 import { pickDevice, pickSocket } from "../discovery.js";
 import { FlowError } from "../errors.js";
+import { detectPlatform, Platform } from "../platform.js";
 
 export const definition = {
   name: "webview_connect",
@@ -20,6 +21,11 @@ export const definition = {
         description:
           '패키지명(부분 일치)으로 WebView 선택. 예: "com.huray" 또는 "huray". socketIndex보다 우선.',
       },
+      platform: {
+        type: "string",
+        enum: ["android", "ios"],
+        description: "연결 대상 플랫폼. 생략 시 자동감지(둘 다 연결 시 지정 필요).",
+      },
     },
   },
 };
@@ -27,6 +33,7 @@ export const definition = {
 interface ConnectArgs {
   socketIndex?: number;
   app?: string;
+  platform?: Platform;
 }
 
 export async function handler(args: ConnectArgs) {
@@ -35,6 +42,35 @@ export async function handler(args: ConnectArgs) {
     if (state.forwardedPort)
       await removeForward(state.forwardedPort).catch(() => {});
     resetState();
+
+    const platform: Platform = args.platform ?? (await detectPlatform());
+
+    if (platform === "ios") {
+      const select = { index: args.socketIndex, urlMatch: args.app };
+      const { cdp, devicePort, pageUrl } = await connectIos(select);
+      const href = (
+        (await cdp.send("Runtime.evaluate", {
+          expression: "window.location.href",
+          returnByValue: true,
+        })) as { result: { value: string } }
+      ).result.value;
+      const committed = pageUrl ?? href;
+
+      state.cdp = cdp;
+      state.platform = "ios";
+      state.iosDevicePort = devicePort;
+      state.iosSelect = select;
+      await attachConsole(cdp);
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `연결 성공 (iOS)\nCDP 포트: ${devicePort}\n현재 URL: ${committed}`,
+          },
+        ],
+      };
+    }
 
     const device = await pickDevice();
     const socket = await pickSocket(device.id, args.socketIndex, args.app);
@@ -56,6 +92,7 @@ export async function handler(args: ConnectArgs) {
     state.deviceId = device.id;
     state.forwardedPort = port;
     state.socketName = socket.socketName;
+    state.platform = "android";
     await attachConsole(cdp);
 
     const warning = isErrorPage

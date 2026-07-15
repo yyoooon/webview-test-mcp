@@ -12,6 +12,13 @@ const cdpMock = vi.hoisted(() => ({
 
 vi.mock("../../src/adb.js");
 vi.mock("../../src/discovery.js", { spy: true });
+// 호스트 머신에 실제 idevice_id로 페어링된 iOS 기기가 있으면 detectPlatform()이
+// 이를 감지해 PLATFORM_AMBIGUOUS를 던질 수 있으므로, 이 스위트(안드로이드 경로 전용)에서는
+// listIosDevices만 고정으로 오버라이드한다.
+vi.mock("../../src/ios.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/ios.js")>();
+  return { ...actual, listIosDevices: vi.fn().mockReturnValue([]) };
+});
 vi.mock("../../src/cdp.js", () => ({
   CdpClient: vi.fn().mockImplementation(() => ({
     connect: vi.fn().mockResolvedValue(undefined),
