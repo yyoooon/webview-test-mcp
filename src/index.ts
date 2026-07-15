@@ -20,6 +20,7 @@ import { definition as flowDef, flowHandler } from './tools/flow.js';
 import { definition as runScriptDef, handler as runScriptHandler } from './tools/run-script.js';
 import { state } from './state.js';
 import { removeForward } from './adb.js';
+import { stopProxy } from './ios.js';
 
 const INSTRUCTIONS = `이 서버는 Android WebView 자동화 툴입니다. 불필요한 왕복을 피하기 위해 다음 원칙을 반드시 지키세요.
 
@@ -213,6 +214,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 process.on('SIGINT', async () => {
   if (state.cdp) state.cdp.close();
   if (state.forwardedPort) await removeForward(state.forwardedPort).catch(() => {});
+  stopProxy();
   process.exit(0);
 });
 
