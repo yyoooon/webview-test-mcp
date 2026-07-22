@@ -41,17 +41,17 @@ export declare function clickHandler(args: {
     selector?: string;
     text?: string;
 }): Promise<{
-    isError: boolean;
-    content: {
-        type: "text";
-        text: string;
-    }[];
-} | {
     content: {
         type: "text";
         text: string;
     }[];
     isError?: undefined;
+} | {
+    isError: boolean;
+    content: {
+        type: "text";
+        text: string;
+    }[];
 }>;
 export declare function typeHandler(args: {
     selector?: string;
@@ -68,4 +68,5 @@ export declare function typeHandler(args: {
         type: "text";
         text: string;
     }[];
+    isError?: undefined;
 }>;

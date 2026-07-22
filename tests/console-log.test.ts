@@ -16,7 +16,7 @@ describe('ConsoleBuffer', () => {
   it('attach subscribes to console/exception events and enables Runtime', async () => {
     const cdp = makeFakeCdp();
     const buffer = new ConsoleBuffer();
-    await buffer.attach(cdp as any);
+    await buffer.attach(cdp as any, 'android');
     expect(cdp.send).toHaveBeenCalledWith('Runtime.enable');
     expect(cdp.handlers['Runtime.consoleAPICalled']).toBeDefined();
     expect(cdp.handlers['Runtime.exceptionThrown']).toBeDefined();
@@ -25,7 +25,7 @@ describe('ConsoleBuffer', () => {
   it('records consoleAPICalled with joined args', async () => {
     const cdp = makeFakeCdp();
     const buffer = new ConsoleBuffer();
-    await buffer.attach(cdp as any);
+    await buffer.attach(cdp as any, 'android');
     cdp.handlers['Runtime.consoleAPICalled']({
       type: 'error',
       args: [{ type: 'string', value: 'fetch failed:' }, { type: 'number', value: 500 }],
@@ -38,7 +38,7 @@ describe('ConsoleBuffer', () => {
   it('records exceptionThrown with description', async () => {
     const cdp = makeFakeCdp();
     const buffer = new ConsoleBuffer();
-    await buffer.attach(cdp as any);
+    await buffer.attach(cdp as any, 'android');
     cdp.handlers['Runtime.exceptionThrown']({
       exceptionDetails: { text: 'Uncaught', exception: { description: 'TypeError: x is not a function' } },
     });
@@ -72,11 +72,35 @@ describe('ConsoleBuffer', () => {
   it('truncates long messages to 300 chars', async () => {
     const cdp = makeFakeCdp();
     const buffer = new ConsoleBuffer();
-    await buffer.attach(cdp as any);
+    await buffer.attach(cdp as any, 'android');
     cdp.handlers['Runtime.consoleAPICalled']({
       type: 'error',
       args: [{ type: 'string', value: 'x'.repeat(500) }],
     });
     expect(buffer.since(0)[0].text).toHaveLength(300);
+  });
+
+  it('records Console.messageAdded (iOS WebKit event)', async () => {
+    const cdp = makeFakeCdp();
+    const buffer = new ConsoleBuffer();
+    await buffer.attach(cdp as any, 'ios');
+    cdp.handlers['Console.messageAdded']({
+      message: { level: 'error', text: 'boom' },
+    });
+    expect(buffer.since(0)).toEqual([
+      { kind: 'console', level: 'error', text: 'boom' },
+    ]);
+  });
+
+  it('does not subscribe Console.messageAdded on android (or when platform omitted)', async () => {
+    const cdpAndroid = makeFakeCdp();
+    await new ConsoleBuffer().attach(cdpAndroid as any, 'android');
+    expect(cdpAndroid.handlers['Console.messageAdded']).toBeUndefined();
+    expect(cdpAndroid.send).not.toHaveBeenCalledWith('Console.enable');
+
+    const cdpDefault = makeFakeCdp();
+    await new ConsoleBuffer().attach(cdpDefault as any);
+    expect(cdpDefault.handlers['Console.messageAdded']).toBeUndefined();
+    expect(cdpDefault.send).not.toHaveBeenCalledWith('Console.enable');
   });
 });

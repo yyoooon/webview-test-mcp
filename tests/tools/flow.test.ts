@@ -361,6 +361,72 @@ describe('flowHandler — netwait orchestration', () => {
   });
 });
 
+describe('flowHandler — iOS awaitPromise fallback', () => {
+  beforeEach(() => { vi.clearAllMocks(); stateModule.resetState(); stateModule.state.platform = 'ios'; });
+  afterEach(() => { stateModule.state.platform = null; });
+
+  it('polls window global instead of awaitPromise and returns marks', async () => {
+    const cdp = {
+      connected: true,
+      send: vi.fn().mockImplementation((method: string, params?: any) => {
+        if (method === 'Runtime.evaluate') {
+          if (params?.returnByValue) {
+            // 폴링 evaluate: done:true를 첫 호출에 반환해 대기 없이 결정적으로 통과
+            return Promise.resolve({
+              result: { value: JSON.stringify({ done: true, value: { marks: [], totalMs: 1 } }) },
+            });
+          }
+          // kickoff evaluate: 반환값은 사용되지 않음
+          return Promise.resolve({ result: { value: undefined } });
+        }
+        return Promise.resolve({});
+      }),
+    };
+    stateModule.state.cdp = cdp as any;
+
+    const result = await flowHandler({ steps: [{ sleep: 1 }] });
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse((result.content[0] as { text: string }).text);
+    expect(parsed.marks).toEqual([]);
+    expect(parsed.totalMs).toBe(1);
+  });
+});
+
+describe('flowHandler — iOS control gating', () => {
+  beforeEach(() => { vi.clearAllMocks(); stateModule.resetState(); stateModule.state.platform = 'ios'; });
+  afterEach(() => { stateModule.state.platform = null; });
+
+  it('rejects osTap on iOS instead of calling adb', async () => {
+    const segment1 = {
+      marks: [{ i: 0, kind: 'osTap', ok: true, ms: 1, x: 100, y: 200 }],
+      totalMs: 1,
+      control: { type: 'osTap', i: 0, x: 100, y: 200, selector: '#btn' },
+    };
+    const cdp = {
+      connected: true,
+      send: vi.fn().mockImplementation((method: string, params?: any) => {
+        if (method === 'Runtime.evaluate') {
+          if (params?.returnByValue) {
+            return Promise.resolve({
+              result: { value: JSON.stringify({ done: true, value: segment1 }) },
+            });
+          }
+          return Promise.resolve({ result: { value: undefined } });
+        }
+        return Promise.resolve({});
+      }),
+    };
+    stateModule.state.cdp = cdp as any;
+
+    const result = await flowHandler({ steps: [{ osTap: '#btn' }] });
+
+    expect(result.isError).toBe(true);
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain('osTap/osSwipe/osKey');
+    expect(adbModule.inputTap).not.toHaveBeenCalled();
+  });
+});
+
 describe('flowHandler — console attachment', () => {
   beforeEach(() => { vi.clearAllMocks(); stateModule.resetState(); });
 

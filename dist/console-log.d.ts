@@ -11,5 +11,5 @@ export declare class ConsoleBuffer {
     get cursor(): number;
     push(entry: ConsoleEntry): void;
     since(cursor: number): ConsoleEntry[];
-    attach(cdp: CdpClient): Promise<void>;
+    attach(cdp: CdpClient, platform?: 'android' | 'ios' | null): Promise<void>;
 }

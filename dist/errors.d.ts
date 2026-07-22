@@ -9,7 +9,9 @@ export declare enum ErrorCode {
     JS_ERROR = "JS_ERROR",
     ASSERT_FAILED = "ASSERT_FAILED",
     INVALID_STEP = "INVALID_STEP",
-    NOT_CONNECTED = "NOT_CONNECTED"
+    NOT_CONNECTED = "NOT_CONNECTED",
+    IOS_TOOLING_MISSING = "IOS_TOOLING_MISSING",
+    PLATFORM_AMBIGUOUS = "PLATFORM_AMBIGUOUS"
 }
 export declare class FlowError extends Error {
     code: ErrorCode;

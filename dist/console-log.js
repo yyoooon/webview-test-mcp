@@ -27,7 +27,7 @@ export class ConsoleBuffer {
         const firstKept = this.total - this.entries.length;
         return this.entries.slice(Math.max(0, cursor - firstKept));
     }
-    async attach(cdp) {
+    async attach(cdp, platform) {
         cdp.on('Runtime.consoleAPICalled', (params) => {
             const p = params;
             this.push({ kind: 'console', level: p.type ?? 'log', text: formatArgs(p.args ?? []) });
@@ -38,7 +38,16 @@ export class ConsoleBuffer {
             const text = (d?.exception?.description ?? d?.text ?? 'Unknown exception').slice(0, MAX_TEXT_LENGTH);
             this.push({ kind: 'exception', level: 'error', text });
         });
+        if (platform === 'ios') {
+            cdp.on('Console.messageAdded', (params) => {
+                const p = params;
+                this.push({ kind: 'console', level: p.message?.level ?? 'log', text: (p.message?.text ?? '').slice(0, MAX_TEXT_LENGTH) });
+            });
+        }
         await cdp.send('Runtime.enable');
+        if (platform === 'ios') {
+            await cdp.send('Console.enable').catch(() => { });
+        }
     }
 }
 //# sourceMappingURL=console-log.js.map

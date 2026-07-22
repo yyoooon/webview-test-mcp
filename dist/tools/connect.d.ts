@@ -1,3 +1,4 @@
+import { Platform } from "../platform.js";
 export declare const definition: {
     name: string;
     description: string;
@@ -12,12 +13,18 @@ export declare const definition: {
                 type: string;
                 description: string;
             };
+            platform: {
+                type: string;
+                enum: string[];
+                description: string;
+            };
         };
     };
 };
 interface ConnectArgs {
     socketIndex?: number;
     app?: string;
+    platform?: Platform;
 }
 export declare function handler(args: ConnectArgs): Promise<{
     content: {

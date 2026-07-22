@@ -21,4 +21,9 @@ describe('formatError', () => {
     const out = formatError(ErrorCode.SELECTOR_NOT_FOUND, { similar: ['Cancel'] });
     expect(out.extras).toEqual({ similar: ['Cancel'] });
   });
+
+  it('provides default messages for iOS error codes', () => {
+    expect(formatError(ErrorCode.IOS_TOOLING_MISSING).message).toContain('ios-webkit-debug-proxy');
+    expect(formatError(ErrorCode.PLATFORM_AMBIGUOUS).message).toContain('platform');
+  });
 });

@@ -10,6 +10,8 @@ export enum ErrorCode {
   ASSERT_FAILED = 'ASSERT_FAILED',
   INVALID_STEP = 'INVALID_STEP',
   NOT_CONNECTED = 'NOT_CONNECTED',
+  IOS_TOOLING_MISSING = 'IOS_TOOLING_MISSING',
+  PLATFORM_AMBIGUOUS = 'PLATFORM_AMBIGUOUS',
 }
 
 const DEFAULT_MESSAGES: Record<ErrorCode, string> = {
@@ -29,6 +31,10 @@ const DEFAULT_MESSAGES: Record<ErrorCode, string> = {
   [ErrorCode.INVALID_STEP]: '알 수 없는 step 형식.',
   [ErrorCode.NOT_CONNECTED]:
     'WebView에 연결되어 있지 않습니다. webview_connect를 먼저 호출하세요.',
+  [ErrorCode.IOS_TOOLING_MISSING]:
+    'iOS 도구가 없습니다. `brew install ios-webkit-debug-proxy`로 설치하세요 (libimobiledevice 포함).',
+  [ErrorCode.PLATFORM_AMBIGUOUS]:
+    'Android·iOS 기기가 모두 연결되어 있습니다. webview_connect에 platform: "android" 또는 "ios"를 지정하세요.',
 };
 
 export class FlowError extends Error {

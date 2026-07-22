@@ -145,27 +145,76 @@ export async function flowHandler(args: Partial<FlowInput>) {
     try {
     while (remainingSteps.length > 0) {
       const expr = compileFlow({ steps: remainingSteps, bail }, { startIndex });
-      const evalResult = (await cdp.send('Runtime.evaluate', {
-        expression: expr,
-        awaitPromise: true,
-        returnByValue: true,
-      })) as { result: { value: SegmentResult }; exceptionDetails?: { exception?: { description?: string } } };
 
-      if (evalResult.exceptionDetails) {
-        const desc = evalResult.exceptionDetails.exception?.description || 'Unknown';
-        return {
-          isError: true,
-          content: [{ type: 'text' as const, text: `[JS_ERROR] flow 실행 중 예외: ${desc}` }],
-        };
+      let segment: SegmentResult;
+      if (state.platform === 'ios') {
+        // iOS WebKit의 Runtime.evaluate는 awaitPromise를 무시하고 Promise를 {}로 반환 →
+        // 전역에 결과를 저장한 뒤 폴링해서 SegmentResult를 얻는다.
+        const M = '__nestFlowSeg';
+        await cdp.send('Runtime.evaluate', {
+          expression: `window.${M}={done:false}; Promise.resolve(${expr}).then(r=>{window.${M}={done:true,value:r}}).catch(e=>{window.${M}={done:true,error:String((e&&e.message)||e)}}); 0`,
+        });
+        const end = Date.now() + 30_000;
+        let polled: { done?: boolean; value?: SegmentResult; error?: string } = {};
+        while (Date.now() < end) {
+          const r = (await cdp.send('Runtime.evaluate', {
+            expression: `JSON.stringify(window.${M})`,
+            returnByValue: true,
+          })) as { result: { value: string } };
+          polled = JSON.parse(r.result.value);
+          if (polled.done) break;
+          await new Promise((res) => setTimeout(res, 50));
+        }
+        if (!polled.done) {
+          return {
+            isError: true,
+            content: [{ type: 'text' as const, text: `[WAIT_TIMEOUT] flow 세그먼트가 30초 내 완료되지 않았습니다.` }],
+          };
+        }
+        if (polled.error) {
+          return {
+            isError: true,
+            content: [{ type: 'text' as const, text: `[JS_ERROR] flow 실행 중 예외: ${polled.error}` }],
+          };
+        }
+        segment = polled.value as SegmentResult;
+      } else {
+        const evalResult = (await cdp.send('Runtime.evaluate', {
+          expression: expr,
+          awaitPromise: true,
+          returnByValue: true,
+        })) as { result: { value: SegmentResult }; exceptionDetails?: { exception?: { description?: string } } };
+
+        if (evalResult.exceptionDetails) {
+          const desc = evalResult.exceptionDetails.exception?.description || 'Unknown';
+          return {
+            isError: true,
+            content: [{ type: 'text' as const, text: `[JS_ERROR] flow 실행 중 예외: ${desc}` }],
+          };
+        }
+
+        segment = evalResult.result.value;
       }
-
-      const segment = evalResult.result.value;
       allMarks.push(...segment.marks);
       totalMs += segment.totalMs;
       if (segment.captured) captured = { ...(captured ?? {}), ...segment.captured };
 
       if (segment.control) {
         const c = segment.control;
+        if (
+          state.platform === 'ios' &&
+          (c.type === 'osTap' || c.type === 'osSwipe' || c.type === 'osKey')
+        ) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: 'text' as const,
+                text: 'iOS에서는 osTap/osSwipe/osKey(OS-level 터치)를 지원하지 않습니다. 화면 내 조작은 click/type을 사용하세요.',
+              },
+            ],
+          };
+        }
         let stop = false;
         if (c.type === 'osTap') {
           await inputTap(c.x, c.y, state.deviceId ?? undefined);

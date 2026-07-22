@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { CdpClient } from '../src/cdp.js';
+import { CdpClient, selectTarget } from '../src/cdp.js';
 import WebSocket from 'ws';
 
 vi.mock('ws', () => {
@@ -159,5 +159,29 @@ describe('CdpClient', () => {
     ws._emit('message', JSON.stringify({ method: 'Runtime.consoleAPICalled', params: {} }));
 
     expect(handler).not.toHaveBeenCalled();
+  });
+});
+
+describe('selectTarget', () => {
+  const android = [
+    { type: 'service_worker', webSocketDebuggerUrl: 'ws://a/sw' },
+    { type: 'page', url: 'https://app/', webSocketDebuggerUrl: 'ws://a/p' },
+  ];
+  const ios = [
+    { url: 'https://m.naver.com/', webSocketDebuggerUrl: 'ws://i/1' },
+    { url: 'https://google.com/', webSocketDebuggerUrl: 'ws://i/2' },
+  ];
+
+  it('picks the page target on android (ignores non-page)', () => {
+    expect(selectTarget(android)?.webSocketDebuggerUrl).toBe('ws://a/p');
+  });
+  it('picks first ws target on ios (no type field)', () => {
+    expect(selectTarget(ios)?.webSocketDebuggerUrl).toBe('ws://i/1');
+  });
+  it('urlMatch selects by url substring', () => {
+    expect(selectTarget(ios, { urlMatch: 'google' })?.webSocketDebuggerUrl).toBe('ws://i/2');
+  });
+  it('index selects by position', () => {
+    expect(selectTarget(ios, { index: 1 })?.webSocketDebuggerUrl).toBe('ws://i/2');
   });
 });
